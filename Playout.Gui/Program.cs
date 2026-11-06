@@ -13,7 +13,7 @@ internal static class Program
     }
 }
 
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     private static readonly Color BackgroundColor = Color.FromArgb(17, 20, 28);
     private static readonly Color PanelColor = Color.FromArgb(29, 34, 45);
@@ -58,14 +58,17 @@ internal sealed class MainForm : Form
         lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
         lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
 
-        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 1"), 0, 0);
+        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 1", "Deck 1", deck1Status), 0, 0);
         lowerLayout.Controls.Add(CreateAotPanel(), 1, 0);
-        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 2"), 2, 0);
+        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 2", "Deck 2", deck2Status), 2, 0);
 
         layout.Controls.Add(lowerLayout, 0, 1);
         layout.SetColumnSpan(lowerLayout, 2);
 
         Controls.Add(layout);
+        Controls.Add(CreateEngineToolbar());
+        Shown += MainFormShown;
+        FormClosed += MainFormClosed;
     }
 
     private static Control CreatePlaylistPanel()
@@ -92,50 +95,66 @@ internal sealed class MainForm : Form
         return panel;
     }
 
-    private static Control CreateBrowserPanel()
+    private Control CreateBrowserPanel()
     {
         Panel panel = CreatePanel();
+        TableLayoutPanel browser = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        browser.Controls.Add(CreateHeading("MUSIKQUELLEN / RECHERCHE"), 0, 0);
 
-        ListView list = new()
-        {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            BackColor = PanelColor,
-            ForeColor = TextColor,
-            BorderStyle = BorderStyle.None
-        };
+        FlowLayoutPanel sourceButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
+        sourceButtons.Controls.Add(CreateActionButton("Ordner hinzufügen", async () => await AddSourceAsync()));
+        sourceButtons.Controls.Add(CreateActionButton("Quelle entfernen", async () => await RemoveSourceAsync()));
+        sourceButtons.Controls.Add(CreateActionButton("Neu einlesen", async () => await RefreshMusicAsync()));
+        browser.Controls.Add(sourceButtons, 0, 1);
 
-        list.Columns.Add("Titel", 240);
-        list.Columns.Add("Interpret", 180);
-        list.Columns.Add("Dauer", 80);
+        sourceSelector.Dock = DockStyle.Fill;
+        sourceSelector.DropDownStyle = ComboBoxStyle.DropDownList;
+        browser.Controls.Add(sourceSelector, 0, 2);
 
-        TextBox search = new()
-        {
-            Dock = DockStyle.Top,
-            PlaceholderText = "Musik suchen",
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        musicSearch.Dock = DockStyle.Fill;
+        musicSearch.PlaceholderText = "Dateiname oder Pfad suchen";
+        musicSearch.TextChanged += (_, _) => RenderTracks();
+        browser.Controls.Add(musicSearch, 0, 3);
 
-        panel.Controls.Add(list);
-        panel.Controls.Add(search);
-        panel.Controls.Add(CreateHeading("MUSIK-RECHERCHE / CUE"));
+        musicList.Dock = DockStyle.Fill;
+        musicList.View = View.Details;
+        musicList.FullRowSelect = true;
+        musicList.MultiSelect = false;
+        musicList.BackColor = PanelColor;
+        musicList.ForeColor = TextColor;
+        musicList.BorderStyle = BorderStyle.None;
+        musicList.Columns.Add("Titel (Dateiname)", 220);
+        musicList.Columns.Add("Dateipfad", 420);
+        browser.Controls.Add(musicList, 0, 4);
+
+        FlowLayoutPanel loadButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
+        loadButtons.Controls.Add(CreateActionButton("In Schacht 1 laden", async () => await LoadSelectedAsync("Deck 1")));
+        loadButtons.Controls.Add(CreateActionButton("In Schacht 2 laden", async () => await LoadSelectedAsync("Deck 2")));
+        loadButtons.Controls.Add(libraryStatus);
+        browser.Controls.Add(loadButtons, 0, 5);
+        panel.Controls.Add(browser);
         return panel;
     }
 
-    private static Control CreateDeckPanel(string title)
+    private Control CreateDeckPanel(string title, string deckId, Label status)
     {
         Panel panel = CreatePanel();
-
-        Label status = new()
-        {
-            Dock = DockStyle.Fill,
-            Text = "Kein Titel geladen",
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = MutedColor
-        };
-
+        status.Dock = DockStyle.Fill;
+        status.Text = "Engine nicht verbunden";
+        status.TextAlign = ContentAlignment.MiddleCenter;
+        status.ForeColor = MutedColor;
+        FlowLayoutPanel buttons = new() { Dock = DockStyle.Bottom, Height = 42, WrapContents = false };
+        buttons.Controls.Add(CreateActionButton("Start", async () => await RunEngineActionAsync(() => engine.PlayAsync(deckId))));
+        buttons.Controls.Add(CreateActionButton("Pause", async () => await RunEngineActionAsync(() => engine.PauseAsync(deckId))));
+        buttons.Controls.Add(CreateActionButton("Stopp", async () => await RunEngineActionAsync(() => engine.StopAsync(deckId))));
         panel.Controls.Add(status);
+        panel.Controls.Add(buttons);
         panel.Controls.Add(CreateHeading(title));
         return panel;
     }

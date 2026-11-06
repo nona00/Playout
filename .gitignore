@@ -9,3 +9,5 @@
 /Playout.Engine/runtimes
 /Playout.Engine.Tests/bin
 /Playout.Engine.Tests/obj
+/Playout.Gui.Tests/bin/Debug
+/Playout.Gui.Tests/obj
