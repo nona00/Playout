@@ -7,3 +7,5 @@
 /Playout.Gui/bin
 /Playout.Gui/obj
 /Playout.Engine/runtimes
+/Playout.Engine.Tests/bin
+/Playout.Engine.Tests/obj

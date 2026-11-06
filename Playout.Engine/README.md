@@ -22,4 +22,18 @@ Für die Routingkonfiguration ist die Geräte-ID aus der Antwort zu verwenden, nic
 
 `GET /api/audio-routing` liest die Konfiguration, `PUT /api/audio-routing` ersetzt sie. Die Kanalindizes sind nullbasiert. Die Engine speichert sie derzeit in `%LOCALAPPDATA%\Playout\Engine\audio-routing.json`. Eine konfigurierte Geräte-ID bedeutet nicht, dass das Gerät verfügbar ist oder der Kanal tatsächlich existiert.
 
-Die Geräteerkennung prüft nicht, ob die gespeicherten Zuordnungen verwendbar sind. Die Initialisierung von BASS, WASAPI und ASIO zur Audiowiedergabe, Mehrkanal-Mixing, CUE/PFL, die eigentliche Ausspielung und AOT-Steuerung sind noch nicht implementiert. `audioInitialized` im Status bleibt daher `false`.
+Mehrere Ausgänge dürfen dieselben Kanäle desselben Geräts verwenden. Ihre Signale werden addiert und auf den Bereich von -1 bis 1 begrenzt. Ausgänge mit `device: null` bleiben unverbunden. Das erlaubt auch die Nutzung nur eines Interfaces für mehrere Programmausgänge. Bei ASIO müssen sich die benötigten Kanäle vom Treiber zu einer Gruppe verbinden lassen.
+
+## Wiedergabe
+
+Die Wiedergabe wird über die lokale API gesteuert:
+
+1. Mit `PUT /api/audio-routing` die Geräte und Kanäle zuordnen.
+2. Mit `POST /api/audio/initialize` alle konfigurierten Geräte initialisieren. Ist eine Zuordnung nicht verfügbar, schlägt die Initialisierung insgesamt fehl und bereits geöffnete Geräte werden wieder freigegeben. Ohne konfigurierte Geräte ist die Initialisierung möglich, aber kein Deck kann spielen.
+3. Mit `POST /api/decks/{deckId}/load` und einem JSON-Body wie `{"path":"C:\\Musik\\Titel.mp3"}` eine lokale Audiodatei laden.
+4. Mit `POST /api/decks/{deckId}/play`, `/pause` oder `/stop` das Deck steuern. `stop` setzt auf den Anfang zurück; nach dem Ende startet `play` den Titel erneut. Ein nicht verbundenes Deck kann nicht gestartet werden.
+5. `GET /api/decks` liefert Deckzustände und Dekodierungsfehler, `GET /api/audio/status` zusätzlich initialisierte Geräte und Callbackfehler. `POST /api/audio/shutdown` beendet die Ausgabe und gibt alle Dateien und Geräte frei.
+
+Routingänderungen sind nur nach `shutdown` möglich; anschließend muss die Ausgabe erneut initialisiert werden. WASAPI verwendet den Shared Mode und dessen Mixformat. ASIO verwendet die aktuelle Abtastrate des Treibers. Mono- und Stereo-Dateien werden durch BASS dekodiert und bei unterschiedlichen Abtastraten linear umgerechnet. Das ist keine bandbegrenzte Resampling-Implementierung. Die Wiedergabe läuft in der Engine auch ohne verbundene Oberfläche; die GUI bietet dafür noch keine Bedienung.
+
+Die native Ausgabe und das Verhalten bei Geräteausfall müssen mit den eingesetzten WASAPI- und ASIO-Treibern geprüft werden. CUE/PFL-Vorhören, automatische Spiellistenausspielung und AOT-Steuerung sind noch nicht implementiert.

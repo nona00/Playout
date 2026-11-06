@@ -1,9 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-  </PropertyGroup>
+  </PropertyGroup>          
   <ItemGroup>
     <None Update="runtimes\win-x86\native\*.dll;runtimes\win-x64\native\*.dll;third-party\bass\*.txt"
           CopyToOutputDirectory="PreserveNewest"

@@ -73,7 +73,6 @@ internal static class AudioRoutingValidator
         Dictionary<string, AudioOutputConfiguration> outputs =
             new(StringComparer.OrdinalIgnoreCase);
 
-        List<AudioDeviceMapping> assignedDevices = [];
         int programCount = 0;
         int pflCount = 0;
 
@@ -118,18 +117,14 @@ internal static class AudioRoutingValidator
                 continue;
             }
 
-            bool validDevice = true;
-
             if (device.Backend is not AudioBackend.Wasapi and not AudioBackend.Asio)
             {
                 errors.Add($"Ausgang '{output.Id}' benötigt WASAPI oder ASIO.");
-                validDevice = false;
             }
 
             if (string.IsNullOrWhiteSpace(device.DeviceId))
             {
                 errors.Add($"Ausgang '{output.Id}' benötigt eine Geräte-ID.");
-                validDevice = false;
             }
 
             if (device.LeftChannel < 0 ||
@@ -139,32 +134,7 @@ internal static class AudioRoutingValidator
                 errors.Add(
                     $"Ausgang '{output.Id}' benötigt zwei unterschiedliche, " +
                     "nicht negative Kanalnummern.");
-                validDevice = false;
             }
-
-            if (!validDevice)
-            {
-                continue;
-            }
-
-            bool overlaps = assignedDevices.Any(existing =>
-                existing.Backend == device.Backend &&
-                string.Equals(
-                    existing.DeviceId,
-                    device.DeviceId,
-                    StringComparison.OrdinalIgnoreCase) &&
-                (existing.LeftChannel == device.LeftChannel ||
-                 existing.LeftChannel == device.RightChannel ||
-                 existing.RightChannel == device.LeftChannel ||
-                 existing.RightChannel == device.RightChannel));
-
-            if (overlaps)
-            {
-                errors.Add(
-                    $"Ausgang '{output.Id}' verwendet einen bereits zugeordneten Gerätekanal.");
-            }
-
-            assignedDevices.Add(device);
         }
 
         if (programCount < 3)
