@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Playout.Engine": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:51377;http://localhost:51378"
+    }
+  }
+}

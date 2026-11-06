@@ -1,0 +1,8 @@
+/.vs
+/bin
+/obj
+/Playout.Engine/bin
+/Playout.Engine/obj
+/Playout.Gui/.vs
+/Playout.Gui/bin
+/Playout.Gui/obj
