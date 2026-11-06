@@ -98,29 +98,24 @@ internal sealed partial class MainForm : Form
     private Control CreateBrowserPanel()
     {
         Panel panel = CreatePanel();
-        TableLayoutPanel browser = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+        TableLayoutPanel browser = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
         browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         browser.Controls.Add(CreateHeading("MUSIKQUELLEN / RECHERCHE"), 0, 0);
 
-        FlowLayoutPanel sourceButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
-        sourceButtons.Controls.Add(CreateActionButton("Ordner hinzufügen", async () => await AddSourceAsync()));
-        sourceButtons.Controls.Add(CreateActionButton("Quelle entfernen", async () => await RemoveSourceAsync()));
-        sourceButtons.Controls.Add(CreateActionButton("Neu einlesen", async () => await RefreshMusicAsync()));
-        browser.Controls.Add(sourceButtons, 0, 1);
-
-        sourceSelector.Dock = DockStyle.Fill;
-        sourceSelector.DropDownStyle = ComboBoxStyle.DropDownList;
-        browser.Controls.Add(sourceSelector, 0, 2);
-
         musicSearch.Dock = DockStyle.Fill;
         musicSearch.PlaceholderText = "Dateiname oder Pfad suchen";
         musicSearch.TextChanged += (_, _) => RenderTracks();
-        browser.Controls.Add(musicSearch, 0, 3);
+        browser.Controls.Add(musicSearch, 0, 1);
+
+        FlowLayoutPanel pfl = new() { Dock = DockStyle.Fill, WrapContents = false };
+        pfl.Controls.Add(new Label { Text = "PFL", AutoSize = true, Padding = new Padding(0, 8, 8, 0), ForeColor = MutedColor });
+        pfl.Controls.Add(pflStatus);
+        pfl.Controls.Add(CreateActionButton("Stopp", async () => await RunEngineActionAsync(() => engine.StopAsync("PFL"))));
+        browser.Controls.Add(pfl, 0, 2);
 
         musicList.Dock = DockStyle.Fill;
         musicList.View = View.Details;
@@ -131,13 +126,23 @@ internal sealed partial class MainForm : Form
         musicList.BorderStyle = BorderStyle.None;
         musicList.Columns.Add("Titel (Dateiname)", 220);
         musicList.Columns.Add("Dateipfad", 420);
-        browser.Controls.Add(musicList, 0, 4);
+        ContextMenuStrip musicMenu = new();
+        musicMenu.Items.Add("Über PFL vorhören", null, async (_, _) => await PreviewSelectedAsync());
+        musicList.ContextMenuStrip = musicMenu;
+        musicList.MouseDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Right) return;
+            ListViewItem? item = musicList.GetItemAt(eventArgs.X, eventArgs.Y);
+            if (item is not null) item.Selected = true;
+        };
+        musicList.DoubleClick += async (_, _) => await LoadAndPlayInFreeDeckAsync();
+        browser.Controls.Add(musicList, 0, 3);
 
         FlowLayoutPanel loadButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
         loadButtons.Controls.Add(CreateActionButton("In Schacht 1 laden", async () => await LoadSelectedAsync("Deck 1")));
         loadButtons.Controls.Add(CreateActionButton("In Schacht 2 laden", async () => await LoadSelectedAsync("Deck 2")));
         loadButtons.Controls.Add(libraryStatus);
-        browser.Controls.Add(loadButtons, 0, 5);
+        browser.Controls.Add(loadButtons, 0, 4);
         panel.Controls.Add(browser);
         return panel;
     }

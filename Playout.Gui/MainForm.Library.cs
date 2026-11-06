@@ -1,4 +1,6 @@
 using System.Drawing;
+using System.Diagnostics;
+using System.ComponentModel;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -16,25 +18,29 @@ internal sealed partial class MainForm
     });
     private readonly List<string> sources = [];
     private readonly List<MusicTrack> tracks = [];
-    private readonly ComboBox sourceSelector = new();
     private readonly TextBox musicSearch = new();
     private readonly ListView musicList = new();
     private readonly Label libraryStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
     private readonly Label engineStatus = new() { AutoSize = true, ForeColor = TextColor, Padding = new Padding(6, 8, 0, 0), Text = "Engine: Verbindung wird geprüft …" };
     private readonly Label deck1Status = new();
     private readonly Label deck2Status = new();
+    private readonly Label pflStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(0, 8, 8, 0), Text = "PFL nicht verbunden" };
     private readonly System.Windows.Forms.Timer statusTimer = new() { Interval = 2000 };
     private readonly CancellationTokenSource lifetime = new();
     private bool scanning;
     private bool polling;
     private bool commandInProgress;
+    private bool startingEngine;
 
     private Control CreateEngineToolbar()
     {
         FlowLayoutPanel toolbar = new() { Dock = DockStyle.Top, Height = 42, Padding = new Padding(12, 4, 0, 0), WrapContents = false };
-        toolbar.Controls.Add(CreateActionButton("Audio einrichten", async () => await ConfigureAudioAsync()));
-        toolbar.Controls.Add(CreateActionButton("Audio starten", async () => await InitializeAudioAsync()));
-        toolbar.Controls.Add(CreateActionButton("Audio beenden", async () => await ShutdownAudioAsync()));
+        Button settings = CreateActionButton("?", async () => await OpenSettingsAsync());
+        settings.AccessibleName = "Einstellungen";
+        settings.Font = new Font("Segoe UI Symbol", 12, FontStyle.Regular);
+        settings.Width = 38;
+        settings.TextAlign = ContentAlignment.MiddleCenter;
+        toolbar.Controls.Add(settings);
         toolbar.Controls.Add(engineStatus);
         return toolbar;
     }
@@ -51,7 +57,6 @@ internal sealed partial class MainForm
         try
         {
             sources.AddRange(library.LoadSources());
-            RenderSources();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
@@ -59,6 +64,7 @@ internal sealed partial class MainForm
         }
         statusTimer.Tick += async (_, _) => await RefreshEngineStatusAsync();
         statusTimer.Start();
+        await EnsureEngineRunningAsync();
         Task statusRefresh = RefreshEngineStatusAsync();
         await RefreshMusicAsync();
         await statusRefresh;
@@ -72,63 +78,20 @@ internal sealed partial class MainForm
         engine.Dispose();
     }
 
-    private async Task AddSourceAsync()
+    private async Task OpenSettingsAsync()
     {
         if (scanning) return;
-        using FolderBrowserDialog dialog = new() { Description = "Musikordner auswählen", UseDescriptionForTitle = true };
+        using SettingsForm dialog = new(
+            sources,
+            updated => library.SaveSources(updated),
+            ConfigureAudioAsync,
+            ConfigurePflAsync,
+            InitializeAudioAsync,
+            ShutdownAudioAsync);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        try
-        {
-            string path = MusicLibrary.NormalizePath(dialog.SelectedPath);
-            if (sources.Contains(path, StringComparer.OrdinalIgnoreCase))
-            {
-                sourceSelector.SelectedItem = path;
-                return;
-            }
-            List<string> updated = [.. sources, path];
-            library.SaveSources(updated);
-            sources.Add(path);
-            RenderSources();
-            sourceSelector.SelectedItem = path;
-            await RefreshMusicAsync();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            ShowError("Musikquelle konnte nicht gespeichert werden", exception);
-        }
-    }
-
-    private async Task RemoveSourceAsync()
-    {
-        if (scanning) return;
-        if (sourceSelector.SelectedItem is not string source)
-        {
-            MessageBox.Show(this, "Bitte zuerst eine Musikquelle auswählen.", "Musikquellen", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-        if (MessageBox.Show(this, $"Quelle entfernen? Die Audiodateien bleiben unverändert.\n\n{source}", "Musikquellen",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-        try
-        {
-            List<string> updated = sources.Where(item => !string.Equals(item, source, StringComparison.OrdinalIgnoreCase)).ToList();
-            library.SaveSources(updated);
-            sources.Clear();
-            sources.AddRange(updated);
-            RenderSources();
-            await RefreshMusicAsync();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            ShowError("Musikquelle konnte nicht entfernt werden", exception);
-        }
-    }
-
-    private void RenderSources()
-    {
-        sourceSelector.Items.Clear();
-        foreach (string source in sources) sourceSelector.Items.Add(source);
-        if (sourceSelector.Items.Count > 0) sourceSelector.SelectedIndex = 0;
-        sourceSelector.Enabled = sourceSelector.Items.Count > 0;
+        sources.Clear();
+        sources.AddRange(dialog.Sources);
+        await RefreshMusicAsync();
     }
 
     private async Task RefreshMusicAsync()
@@ -158,6 +121,66 @@ internal sealed partial class MainForm
             if (!IsDisposed) ShowError("Musikquellen konnten nicht eingelesen werden", exception);
         }
         finally { scanning = false; }
+    }
+
+    private async Task EnsureEngineRunningAsync()
+    {
+        try
+        {
+            await engine.GetStatusAsync();
+            return;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+        }
+
+        if (startingEngine) return;
+        startingEngine = true;
+        try
+        {
+            StartEngineProcess();
+            DateTime deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline && !lifetime.IsCancellationRequested)
+            {
+                await Task.Delay(250, lifetime.Token);
+                try
+                {
+                    await engine.GetStatusAsync();
+                    return;
+                }
+                catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+                {
+                }
+            }
+            throw new InvalidOperationException("Die gestartete Engine antwortet nicht auf http://127.0.0.1:5187.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            if (!IsDisposed) ShowError("Engine konnte nicht gestartet werden", exception);
+        }
+        finally { startingEngine = false; }
+    }
+
+    private static void StartEngineProcess()
+    {
+        string[] candidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "Playout.Engine.exe"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Playout.Engine", "bin", "Debug", "net8.0", "Playout.Engine.exe")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Playout.Engine", "bin", "Release", "net8.0", "Playout.Engine.exe"))
+        ];
+        string? executable = candidates.FirstOrDefault(File.Exists);
+        if (executable is null)
+            throw new InvalidOperationException("Playout.Engine.exe wurde nicht gefunden. Bitte die Engine erstellen oder neben der GUI bereitstellen.");
+        Process? process = Process.Start(new ProcessStartInfo(executable)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = Path.GetDirectoryName(executable)!
+        });
+        if (process is null) throw new InvalidOperationException("Der Engine-Prozess konnte nicht erstellt werden.");
     }
 
     private void RenderTracks()
@@ -201,6 +224,48 @@ internal sealed partial class MainForm
         });
     }
 
+    private async Task PreviewSelectedAsync()
+    {
+        if (!TryGetSelectedTrack(out MusicTrack? track)) return;
+        await RunEngineActionAsync(async () =>
+        {
+            await engine.LoadAsync("PFL", track.Path);
+            await engine.PlayAsync("PFL");
+        });
+    }
+
+    private async Task LoadAndPlayInFreeDeckAsync()
+    {
+        if (!TryGetSelectedTrack(out MusicTrack? track)) return;
+        await RunEngineActionAsync(async () =>
+        {
+            EngineAudioStatus status = await engine.GetStatusAsync();
+            EngineDeckStatus? free = status.Decks.FirstOrDefault(deck =>
+                (deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase) || deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase)) &&
+                deck.Path is null);
+            if (free is null) throw new InvalidOperationException("Kein freier Ausspielschacht verfügbar.");
+            await engine.LoadAsync(free.DeckId, track.Path);
+            await engine.PlayAsync(free.DeckId);
+        });
+    }
+
+    private bool TryGetSelectedTrack(out MusicTrack? track)
+    {
+        track = musicList.SelectedItems.Count == 1 ? musicList.SelectedItems[0].Tag as MusicTrack : null;
+        if (track is null)
+        {
+            MessageBox.Show(this, "Bitte zuerst eine Audiodatei auswählen.", "Musik", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+        if (!File.Exists(track.Path))
+        {
+            MessageBox.Show(this, "Die Datei ist nicht mehr verfügbar. Bitte die Quelle erneut einlesen.", "Musik", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            track = null;
+            return false;
+        }
+        return true;
+    }
+
     private async Task ConfigureAudioAsync()
     {
         await RunEngineActionAsync(async () =>
@@ -209,11 +274,27 @@ internal sealed partial class MainForm
             if (status.Initialized)
                 throw new InvalidOperationException("Die Audioausgabe ist aktiv. Bitte zuerst bewusst 'Audio beenden' wählen; dadurch wird die laufende Wiedergabe gestoppt.");
             IReadOnlyList<EngineBackend> backends = await engine.GetDevicesAsync();
-            using AudioSetupForm dialog = new(backends);
+            using AudioSetupForm dialog = new(backends, "Programmausgänge einrichten",
+                "Beide Decks werden auf dieses Kanalpaar gemischt. Andere Ausgänge bleiben unverändert; gemeinsame Kanäle können auch deren Signal enthalten.");
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Mapping is null) return;
             if (MessageBox.Show(this, "Die zugeordneten Programmausgänge beider Decks werden auf das gewählte Kanalpaar gelegt. Andere Ausgänge bleiben unverändert. Überlappende Kanäle werden gemischt; auch PFL kann dadurch hörbar sein. Fortfahren?",
                 "Routing ändern", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             await engine.AssignDeckOutputsAsync(dialog.Mapping);
+        });
+    }
+
+    private async Task ConfigurePflAsync()
+    {
+        await RunEngineActionAsync(async () =>
+        {
+            EngineAudioStatus status = await engine.GetStatusAsync();
+            if (status.Initialized)
+                throw new InvalidOperationException("Die Audioausgabe ist aktiv. Bitte zuerst bewusst 'Audio beenden' wählen; dadurch wird die laufende Wiedergabe gestoppt.");
+            IReadOnlyList<EngineBackend> backends = await engine.GetDevicesAsync();
+            using AudioSetupForm dialog = new(backends, "PFL-Ausgang einrichten",
+                "PFL wird auf dieses Kanalpaar gelegt. Es sollte sich vom Programmkanal unterscheiden; gleiche Kanäle mischen Programm und PFL.");
+            if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Mapping is null) return;
+            await engine.AssignPflOutputAsync(dialog.Mapping);
         });
     }
 
@@ -223,7 +304,7 @@ internal sealed partial class MainForm
         {
             EngineRouting routing = await engine.GetRoutingAsync();
             bool connected = routing.Decks.Where(deck => deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase) ||
-                deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase)).Any(deck =>
+                deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase) || deck.DeckId.Equals("PFL", StringComparison.OrdinalIgnoreCase)).Any(deck =>
                 routing.Outputs.Any(output => output.Id.Equals(deck.OutputId, StringComparison.OrdinalIgnoreCase) && output.Device is not null));
             if (!connected) throw new InvalidOperationException("Kein Deckausgang ist verbunden. Bitte zuerst 'Audio einrichten' wählen.");
             await engine.InitializeAsync();
@@ -265,14 +346,23 @@ internal sealed partial class MainForm
             engineStatus.Text = error is not null ? $"Audiofehler: {error}" : status.Initialized ? "Engine: Audio aktiv" : "Engine verbunden – Audio nicht gestartet";
             UpdateDeckStatus(deck1Status, status.Decks.FirstOrDefault(deck => deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase)));
             UpdateDeckStatus(deck2Status, status.Decks.FirstOrDefault(deck => deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase)));
+            UpdatePflStatus(status.Decks.FirstOrDefault(deck => deck.DeckId.Equals("PFL", StringComparison.OrdinalIgnoreCase)));
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)
         {
             if (IsDisposed) return;
             engineStatus.Text = "Engine nicht erreichbar – bitte separat starten";
             deck1Status.Text = deck2Status.Text = "Engine nicht verbunden";
+            pflStatus.Text = "PFL: Engine nicht verbunden";
         }
         finally { polling = false; }
+    }
+
+    private void UpdatePflStatus(EngineDeckStatus? deck)
+    {
+        pflStatus.Text = deck is null ? "PFL nicht initialisiert" :
+            $"{(deck.Path is null ? "Kein Titel" : Path.GetFileName(deck.Path))}: {deck.State}" +
+            (string.IsNullOrWhiteSpace(deck.Error) ? "" : $" – {deck.Error}");
     }
 
     private static void UpdateDeckStatus(Label label, EngineDeckStatus? deck)

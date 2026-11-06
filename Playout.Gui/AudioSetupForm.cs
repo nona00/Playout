@@ -10,9 +10,9 @@ internal sealed class AudioSetupForm : Form
 
     public EngineDeviceMapping? Mapping { get; private set; }
 
-    public AudioSetupForm(IReadOnlyList<EngineBackend> backends)
+    public AudioSetupForm(IReadOnlyList<EngineBackend> backends, string title, string description)
     {
-        Text = "Audio für beide Decks einrichten";
+        Text = title;
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -38,7 +38,7 @@ internal sealed class AudioSetupForm : Form
         layout.Controls.Add(left, 1, 1);
         layout.Controls.Add(new Label { Text = "Kanal rechts (ab 0)", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
         layout.Controls.Add(right, 1, 2);
-        Label info = new() { Dock = DockStyle.Fill, Text = "Beide Decks werden auf dieses Kanalpaar gemischt. Andere Ausgänge bleiben unverändert; gemeinsame Kanäle können auch deren Signal enthalten." };
+        Label info = new() { Dock = DockStyle.Fill, Text = description };
         layout.Controls.Add(info, 0, 3);
         layout.SetColumnSpan(info, 2);
         FlowLayoutPanel buttons = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };

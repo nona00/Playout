@@ -33,12 +33,29 @@ internal sealed class EngineClient : IDisposable
     public async Task AssignDeckOutputsAsync(EngineDeviceMapping mapping)
     {
         EngineRouting routing = await GetRoutingAsync();
-        string[] outputIds = routing.Decks.Where(deck => deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase) ||
-            deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase)).Select(deck => deck.OutputId).ToArray();
-        if (outputIds.Length != 2 || outputIds.Any(id => !routing.Outputs.Any(output =>
-            output.Id.Equals(id, StringComparison.OrdinalIgnoreCase) && output.Purpose.Equals("Program", StringComparison.OrdinalIgnoreCase))))
-            throw new InvalidOperationException("Die Programmausgänge der beiden Decks konnten nicht gefunden werden.");
+        string[] outputIds = GetOutputIds(routing, ["Deck 1", "Deck 2"], "Program");
+        await SaveMappingsAsync(routing, outputIds, mapping);
+    }
 
+    public async Task AssignPflOutputAsync(EngineDeviceMapping mapping)
+    {
+        EngineRouting routing = await GetRoutingAsync();
+        string[] outputIds = GetOutputIds(routing, ["PFL"], "Pfl");
+        await SaveMappingsAsync(routing, outputIds, mapping);
+    }
+
+    private static string[] GetOutputIds(EngineRouting routing, string[] deckIds, string purpose)
+    {
+        string[] outputIds = routing.Decks.Where(deck => deckIds.Contains(deck.DeckId, StringComparer.OrdinalIgnoreCase))
+            .Select(deck => deck.OutputId).ToArray();
+        if (outputIds.Length != deckIds.Length || outputIds.Any(id => !routing.Outputs.Any(output =>
+            output.Id.Equals(id, StringComparison.OrdinalIgnoreCase) && output.Purpose.Equals(purpose, StringComparison.OrdinalIgnoreCase))))
+            throw new InvalidOperationException($"Die zugeordneten {purpose}-Ausgänge konnten nicht gefunden werden.");
+        return outputIds;
+    }
+
+    private async Task SaveMappingsAsync(EngineRouting routing, string[] outputIds, EngineDeviceMapping mapping)
+    {
         EngineOutput[] outputs = routing.Outputs.Select(output => outputIds.Contains(output.Id, StringComparer.OrdinalIgnoreCase)
             ? output with { Device = mapping } : output).ToArray();
         await SendAsync(HttpMethod.Put, "api/audio-routing", routing with { Outputs = outputs });

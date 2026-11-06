@@ -26,6 +26,16 @@ builder.Services.AddSingleton<AudioPlayback>();
 
 WebApplication app = builder.Build();
 
+AudioPlayback startupPlayback = app.Services.GetRequiredService<AudioPlayback>();
+try
+{
+    startupPlayback.Initialize(routingStore);
+}
+catch (Exception exception)
+{
+    app.Logger.LogWarning(exception, "Die Audioausgabe konnte beim Start nicht initialisiert werden.");
+}
+
 DateTimeOffset startedAt = DateTimeOffset.UtcNow;
 Stopwatch uptime = Stopwatch.StartNew();
 

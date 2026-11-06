@@ -47,7 +47,8 @@ internal sealed record AudioRoutingConfiguration(
             Decks:
             [
                 new("Deck 1", "Program 1"),
-                new("Deck 2", "Program 2")
+                new("Deck 2", "Program 2"),
+                new("PFL", "PFL")
             ]);
     }
 }
@@ -168,19 +169,21 @@ internal static class AudioRoutingValidator
                 errors.Add($"Die Schacht-ID '{deck.DeckId}' ist mehrfach vorhanden.");
             }
 
+            bool isPflDeck = string.Equals(deck.DeckId, "PFL", StringComparison.OrdinalIgnoreCase);
+            AudioOutputPurpose requiredPurpose = isPflDeck ? AudioOutputPurpose.Pfl : AudioOutputPurpose.Program;
             if (string.IsNullOrWhiteSpace(deck.OutputId) ||
                 !outputs.TryGetValue(deck.OutputId, out AudioOutputConfiguration? output) ||
-                output.Purpose != AudioOutputPurpose.Program)
+                output.Purpose != requiredPurpose)
             {
                 errors.Add(
                     $"Schacht '{deck.DeckId}' muss einem vorhandenen " +
-                    "Programmausgang zugeordnet sein.");
+                    $"{requiredPurpose}-Ausgang zugeordnet sein.");
             }
         }
 
-        if (!deckIds.Contains("Deck 1") || !deckIds.Contains("Deck 2"))
+        if (!deckIds.Contains("Deck 1") || !deckIds.Contains("Deck 2") || !deckIds.Contains("PFL"))
         {
-            errors.Add("Die Zuordnungen für 'Deck 1' und 'Deck 2' sind erforderlich.");
+            errors.Add("Die Zuordnungen für 'Deck 1', 'Deck 2' und 'PFL' sind erforderlich.");
         }
 
         return errors;
@@ -260,6 +263,12 @@ internal sealed class AudioRoutingStore
         AudioRoutingConfiguration loaded =
             JsonSerializer.Deserialize<AudioRoutingConfiguration>(json, SerializerOptions)
             ?? throw new InvalidOperationException("Die Audiokonfiguration ist leer.");
+
+        if (loaded.Decks is not null && !loaded.Decks.Any(deck =>
+            string.Equals(deck.DeckId, "PFL", StringComparison.OrdinalIgnoreCase)))
+        {
+            loaded = loaded with { Decks = [.. loaded.Decks, new DeckOutputAssignment("PFL", "PFL")] };
+        }
 
         IReadOnlyList<string> errors = AudioRoutingValidator.Validate(loaded);
 
