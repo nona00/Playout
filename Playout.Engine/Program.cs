@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+BassNativeLibraries.Register();
+
 // Vorläufig nur lokal erreichbar; noch ohne Authentifizierung.
 builder.WebHost.UseUrls("http://127.0.0.1:5187");
 
