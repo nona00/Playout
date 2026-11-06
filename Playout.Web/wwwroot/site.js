@@ -1,0 +1,60 @@
+const engine = '/api/engine/';
+let tracks = [], selected = null;
+const $ = selector => document.querySelector(selector);
+
+async function request(url, options = {}) {
+  const response = await fetch(url, options);
+  if (response.ok) return response.status === 204 ? null : response.json();
+  let message = `Fehler ${response.status}`;
+  try { const json = await response.json(); message = json.error || (json.errors || []).join('\n') || message; } catch { }
+  throw new Error(message);
+}
+function engineRequest(path, method = 'GET', body) {
+  return request(engine + path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+}
+function statusText(deck) { return deck ? `${deck.path ? deck.path.split(/[\\/]/).pop() : 'Kein Titel geladen'}\n${deck.state}${deck.error ? `\n${deck.error}` : ''}` : 'Nicht initialisiert'; }
+function selectedTrack() { if (!selected) throw new Error('Bitte zuerst einen Titel auswählen.'); return selected; }
+function renderTracks() {
+  const filter = $('#search').value.trim().toLocaleLowerCase(); const list = $('#tracks'); list.replaceChildren();
+  tracks.filter(track => track.path.toLocaleLowerCase().includes(filter)).forEach(track => {
+    const item = document.createElement('div'); item.className = 'track' + (selected === track ? ' selected' : '');
+    item.innerHTML = `<strong></strong><small></small>`; item.querySelector('strong').textContent = track.title; item.querySelector('small').textContent = track.path;
+    item.onclick = () => { selected = track; renderTracks(); };
+    item.ondblclick = () => loadFreeDeck(track);
+    item.oncontextmenu = event => { event.preventDefault(); selected = track; renderTracks(); $('#track-menu').style.left = `${event.clientX}px`; $('#track-menu').style.top = `${event.clientY}px`; $('#track-menu').classList.add('show'); };
+    list.append(item);
+  });
+  $('#library-status').textContent = `${list.childElementCount} / ${tracks.length} Titel`;
+}
+async function refreshTracks() {
+  try { const result = await request('/api/tracks'); tracks = result.tracks; renderTracks(); if (result.errors.length) showError(`${result.errors.length} Quelle(n) konnten nicht vollständig gelesen werden.`); }
+  catch (error) { showError(error.message); }
+}
+async function refreshStatus() {
+  try {
+    const status = await engineRequest('audio/status');
+    $('#engine-status').textContent = status.initialized ? 'Engine: Audio aktiv' : 'Engine verbunden – Audio nicht gestartet';
+    const deck = id => status.decks.find(item => item.deckId === id);
+    $('#deck-1-status').textContent = statusText(deck('Deck 1')); $('#deck-2-status').textContent = statusText(deck('Deck 2'));
+    const pfl = deck('PFL'); $('#pfl-status').textContent = pfl ? `${pfl.path ? pfl.path.split(/[\\/]/).pop() : 'Kein Titel'}: ${pfl.state}` : 'Nicht initialisiert';
+  } catch { $('#engine-status').textContent = 'Engine nicht erreichbar'; $('#deck-1-status').textContent = $('#deck-2-status').textContent = 'Engine nicht verbunden'; $('#pfl-status').textContent = 'Engine nicht verbunden'; }
+}
+async function run(action) { try { await action(); await refreshStatus(); } catch (error) { showError(error.message); } }
+async function loadFreeDeck(track) {
+  await run(async () => { const status = await engineRequest('audio/status'); const deck = status.decks.find(item => (item.deckId === 'Deck 1' || item.deckId === 'Deck 2') && !item.path); if (!deck) throw new Error('Kein freier Ausspielschacht verfügbar.'); await engineRequest(`decks/${encodeURIComponent(deck.deckId)}/load`, 'POST', { path: track.path }); await engineRequest(`decks/${encodeURIComponent(deck.deckId)}/play`, 'POST'); });
+}
+async function loadPfl() { const track = selectedTrack(); await run(async () => { await engineRequest('decks/PFL/load', 'POST', { path: track.path }); await engineRequest('decks/PFL/play', 'POST'); }); }
+function showError(message) { $('#settings-error').textContent = message; if (!$('#settings-dialog').open) alert(message); }
+async function refreshSources() { const sources = await request('/api/sources'); const list = $('#sources'); list.replaceChildren(); sources.forEach(path => { const item = document.createElement('li'); item.className = 'source'; const label = document.createElement('span'); label.textContent = path; const remove = document.createElement('button'); remove.textContent = 'Entfernen'; remove.onclick = async () => { await run(async () => { await request(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await refreshSources(); await refreshTracks(); }); }; item.append(label, remove); list.append(item); }); }
+
+$('#settings-button').onclick = async () => { $('#settings-error').textContent = ''; $('#settings-dialog').showModal(); try { await refreshSources(); } catch (error) { showError(error.message); } };
+$('#add-source').onclick = async () => { const path = $('#source-path').value.trim(); if (!path) return; await run(async () => { await request('/api/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }); $('#source-path').value = ''; await refreshSources(); await refreshTracks(); }); };
+$('#scan').onclick = refreshTracks;
+$('#audio-start').onclick = () => run(() => engineRequest('audio/initialize', 'POST'));
+$('#audio-stop').onclick = () => run(() => engineRequest('audio/shutdown', 'POST'));
+$('#pfl-stop').onclick = () => run(() => engineRequest('decks/PFL/stop', 'POST'));
+$('#preview').onclick = () => { $('#track-menu').classList.remove('show'); loadPfl(); };
+document.addEventListener('click', () => $('#track-menu').classList.remove('show'));
+document.querySelectorAll('[data-deck]').forEach(button => button.onclick = () => run(() => engineRequest(`decks/${encodeURIComponent(button.dataset.deck)}/${button.dataset.action}`, 'POST')));
+$('#search').oninput = renderTracks;
+refreshTracks(); refreshStatus(); setInterval(refreshStatus, 2000);

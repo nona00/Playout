@@ -11,3 +11,5 @@
 /Playout.Engine.Tests/obj
 /Playout.Gui.Tests/bin/Debug
 /Playout.Gui.Tests/obj
+/Playout.Web/bin/Debug
+/Playout.Web/obj
