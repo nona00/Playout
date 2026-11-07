@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
 
@@ -175,7 +177,7 @@ internal sealed class TrayContext : ApplicationContext
     private void ShowLog()
     {
         if (_logWindow is null || _logWindow.IsDisposed)
-            _logWindow = new TrayLogWindow(_logPath, $"{_notifyIcon.Text} – Log");
+            _logWindow = new TrayLogWindow(_logPath, $"{_notifyIcon.Text} – Log", _icon);
 
         if (!_logWindow.Visible)
             _logWindow.Show();
@@ -206,16 +208,22 @@ internal sealed class TrayContext : ApplicationContext
 
 internal sealed class TrayLogWindow : Form
 {
+    private const int InitialTailBytes = 128 * 1024;
+    private const int MaxBytesPerRead = 16 * 1024;
+    private const int MaxVisibleCharacters = 400_000;
     private readonly RichTextBox _textBox = new();
     private readonly CheckBox _blackBackground = new() { Text = "Schwarzer Hintergrund", Checked = true, AutoSize = true };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 500 };
-    private readonly string _logPath;
-    private string? _lastContent;
+    private readonly BackgroundWorker _reader = new();
+    private readonly LogReaderState _readerState;
+    private readonly List<HighlightSpan> _highlightSpans = [];
+    private bool _closing;
 
-    public TrayLogWindow(string logPath, string title)
+    public TrayLogWindow(string logPath, string title, Icon? applicationIcon = null)
     {
-        _logPath = logPath;
+        _readerState = new LogReaderState(logPath);
         Text = title;
+        Icon = applicationIcon;
         WindowState = FormWindowState.Maximized;
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -235,37 +243,143 @@ internal sealed class TrayLogWindow : Form
         Controls.Add(_textBox);
         Controls.Add(toolbar);
 
-        _blackBackground.CheckedChanged += (_, _) => RefreshLog(force: true);
-        _timer.Tick += (_, _) => RefreshLog();
-        FormClosed += (_, _) => _timer.Dispose();
+        _blackBackground.CheckedChanged += (_, _) =>
+        {
+            ApplyTheme();
+            RecolorVisibleText();
+        };
+        _reader.DoWork += (_, args) => args.Result = ReadLogBatch((LogReaderState)args.Argument!);
+        _reader.RunWorkerCompleted += (_, args) =>
+        {
+            if (!_closing && args.Error is null && args.Result is string text)
+                AppendLogText(text);
+        };
+        _timer.Tick += (_, _) => RequestLogRead();
+        FormClosed += (_, _) =>
+        {
+            _closing = true;
+            _timer.Stop();
+            _timer.Dispose();
+        };
         ApplyTheme();
-        RefreshLog(force: true);
+        RequestLogRead();
         _timer.Start();
     }
 
-    private void RefreshLog(bool force = false)
+    private void RequestLogRead()
     {
-        string content;
+        if (!_closing && !_reader.IsBusy)
+            _reader.RunWorkerAsync(_readerState);
+    }
+
+    private static string ReadLogBatch(LogReaderState state)
+    {
         try
         {
-            content = File.Exists(_logPath) ? File.ReadAllText(_logPath) : "Noch keine Logeinträge.";
+            if (!File.Exists(state.Path))
+                return string.Empty;
+
+            using FileStream stream = new(state.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long fileLength = stream.Length;
+            if (!state.Initialized || fileLength < state.Offset)
+            {
+                state.Reset();
+                if (fileLength > InitialTailBytes)
+                {
+                    stream.Position = fileLength - InitialTailBytes;
+                    SkipPartialLine(stream);
+                }
+
+                state.Initialized = true;
+                state.Offset = stream.Position;
+            }
+            else
+            {
+                stream.Position = state.Offset;
+            }
+
+            int byteCount = (int)Math.Min(Math.Max(0, stream.Length - stream.Position), MaxBytesPerRead);
+            if (byteCount == 0)
+                return string.Empty;
+
+            byte[] bytes = new byte[byteCount];
+            int bytesRead = stream.Read(bytes, 0, bytes.Length);
+            state.Offset = stream.Position;
+            char[] chars = new char[Encoding.UTF8.GetMaxCharCount(bytesRead)];
+            int charsRead = state.Decoder.GetChars(bytes, 0, bytesRead, chars, 0, flush: false);
+            string combined = state.PendingText + new string(chars, 0, charsRead);
+            int lastNewLine = combined.LastIndexOf('\n');
+            if (lastNewLine < 0)
+            {
+                state.PendingText = combined;
+                return string.Empty;
+            }
+
+            state.PendingText = combined[(lastNewLine + 1)..];
+            return combined[..(lastNewLine + 1)];
         }
         catch (IOException)
         {
-            return;
+            return string.Empty;
         }
+        catch (UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }
 
-        if (!force && content == _lastContent)
+    private static void SkipPartialLine(Stream stream)
+    {
+        int value;
+        while ((value = stream.ReadByte()) >= 0 && value != '\n')
+        {
+        }
+    }
+
+    private void AppendLogText(string text)
+    {
+        if (text.Length == 0)
             return;
 
-        _lastContent = content;
+        TrimVisibleText(text.Length);
+        string currentText = _textBox.Text;
+        int start = currentText.Length;
         _textBox.SuspendLayout();
-        _textBox.Text = content;
-        ApplySyntaxHighlighting(content);
         _textBox.SelectionStart = _textBox.TextLength;
         _textBox.SelectionLength = 0;
+        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
+        _textBox.AppendText(text);
+        string renderedText = _textBox.Text;
+        AddHighlightSpans(renderedText[start..], start);
+        _textBox.SelectionStart = _textBox.TextLength;
+        _textBox.SelectionLength = 0;
+        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
         _textBox.ScrollToCaret();
         _textBox.ResumeLayout();
+    }
+
+    private void TrimVisibleText(int incomingLength)
+    {
+        int removeAtLeast = _textBox.TextLength + incomingLength - MaxVisibleCharacters;
+        if (removeAtLeast <= 0)
+            return;
+
+        int newline = _textBox.Text.IndexOf('\n', removeAtLeast);
+        int removeCount = newline >= 0 ? newline + 1 : removeAtLeast;
+        _textBox.Select(0, removeCount);
+        _textBox.SelectedText = string.Empty;
+
+        for (int i = _highlightSpans.Count - 1; i >= 0; i--)
+        {
+            HighlightSpan span = _highlightSpans[i];
+            int end = span.Start + span.Length;
+            if (end <= removeCount)
+                _highlightSpans.RemoveAt(i);
+            else if (span.Start < removeCount)
+                _highlightSpans[i] = span with { Start = 0, Length = end - removeCount };
+            else
+                _highlightSpans[i] = span with { Start = span.Start - removeCount };
+        }
     }
 
     private void ApplyTheme()
@@ -274,56 +388,120 @@ internal sealed class TrayLogWindow : Form
         _textBox.ForeColor = _blackBackground.Checked ? Color.Gainsboro : Color.Black;
     }
 
-    private void ApplySyntaxHighlighting(string content)
+    private void AddHighlightSpans(string text, int offset)
     {
-        ApplyTheme();
-        Color normal = _blackBackground.Checked ? Color.Gainsboro : Color.Black;
-        Color timestamp = _blackBackground.Checked ? Color.Gray : Color.DimGray;
-        Color category = _blackBackground.Checked ? Color.LightSkyBlue : Color.DarkBlue;
+        int firstNewSpan = _highlightSpans.Count;
+        _highlightSpans.Add(new HighlightSpan(offset, text.Length, HighlightKind.Normal));
         int lineStart = 0;
 
-        while (lineStart < content.Length)
+        while (lineStart < text.Length)
         {
-            int lineEnd = content.IndexOf('\n', lineStart);
+            int lineEnd = text.IndexOf('\n', lineStart);
             if (lineEnd < 0)
-                lineEnd = content.Length;
-            int lineLength = lineEnd - lineStart;
-
-            ColorRange(lineStart, lineLength, normal);
-            int levelStart = lineLength > 0 ? content.IndexOf('[', lineStart, lineLength) : -1;
-            int levelEnd = levelStart >= 0 ? content.IndexOf(']', levelStart, lineEnd - levelStart) : -1;
-            if (levelStart > lineStart && levelEnd > levelStart)
+                lineEnd = text.Length;
+            int levelStart = lineEnd > lineStart ? text.IndexOf('[', lineStart, lineEnd - lineStart) : -1;
+            int levelEnd = levelStart >= 0 ? text.IndexOf(']', levelStart, lineEnd - levelStart) : -1;
+            if (levelStart > lineStart && levelEnd > levelStart &&
+                TryGetLevelKind(text.Substring(levelStart + 1, levelEnd - levelStart - 1), out HighlightKind levelKind))
             {
-                ColorRange(lineStart, levelStart - lineStart, timestamp);
-                ColorRange(levelStart, levelEnd - levelStart + 1, LevelColor(content.Substring(levelStart + 1, levelEnd - levelStart - 1)));
+                _highlightSpans.Add(new HighlightSpan(offset + lineStart, levelStart - lineStart, HighlightKind.Timestamp));
+                _highlightSpans.Add(new HighlightSpan(offset + levelStart, levelEnd - levelStart + 1, levelKind));
 
                 int categoryStart = levelEnd + 2;
                 int categoryEnd = categoryStart < lineEnd
-                    ? content.IndexOf(':', categoryStart, lineEnd - categoryStart)
+                    ? text.IndexOf(':', categoryStart, lineEnd - categoryStart)
                     : -1;
                 if (categoryEnd > categoryStart)
-                    ColorRange(categoryStart, categoryEnd - categoryStart, category);
+                    _highlightSpans.Add(new HighlightSpan(offset + categoryStart, categoryEnd - categoryStart, HighlightKind.Category));
             }
 
             lineStart = lineEnd + 1;
         }
+
+        RecolorSpans(firstNewSpan);
     }
 
-    private void ColorRange(int start, int length, Color color)
+    private void RecolorVisibleText()
     {
-        if (length <= 0)
-            return;
-
-        _textBox.Select(start, length);
-        _textBox.SelectionColor = color;
+        RecolorSpans(0);
+        _textBox.SelectionStart = _textBox.TextLength;
+        _textBox.SelectionLength = 0;
+        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
     }
 
-    private Color LevelColor(string level) => level switch
+    private void RecolorSpans(int startIndex)
     {
-        "Trace" or "Debug" => _blackBackground.Checked ? Color.DarkGray : Color.Gray,
-        "Information" => _blackBackground.Checked ? Color.LimeGreen : Color.Green,
-        "Warning" => _blackBackground.Checked ? Color.Yellow : Color.DarkGoldenrod,
-        "Error" or "Critical" => Color.Red,
+        for (int i = startIndex; i < _highlightSpans.Count; i++)
+        {
+            HighlightSpan span = _highlightSpans[i];
+            if (span.Length <= 0 || span.Start + span.Length > _textBox.TextLength)
+                continue;
+
+            _textBox.Select(span.Start, span.Length);
+            _textBox.SelectionColor = GetColor(span.Kind);
+        }
+    }
+
+    private Color GetColor(HighlightKind kind) => kind switch
+    {
+        HighlightKind.Timestamp => _blackBackground.Checked ? Color.Gray : Color.DimGray,
+        HighlightKind.Category => _blackBackground.Checked ? Color.LightSkyBlue : Color.DarkBlue,
+        HighlightKind.Trace or HighlightKind.Debug => _blackBackground.Checked ? Color.DarkGray : Color.Gray,
+        HighlightKind.Information => _blackBackground.Checked ? Color.LimeGreen : Color.Green,
+        HighlightKind.Warning => _blackBackground.Checked ? Color.Yellow : Color.DarkGoldenrod,
+        HighlightKind.Error or HighlightKind.Critical => Color.Red,
         _ => _blackBackground.Checked ? Color.Gainsboro : Color.Black
     };
+
+    private static bool TryGetLevelKind(string level, out HighlightKind kind)
+    {
+        kind = level.Trim() switch
+        {
+            "Trace" => HighlightKind.Trace,
+            "Debug" => HighlightKind.Debug,
+            "Information" => HighlightKind.Information,
+            "Warning" => HighlightKind.Warning,
+            "Error" => HighlightKind.Error,
+            "Critical" => HighlightKind.Critical,
+            _ => HighlightKind.Normal
+        };
+        return kind != HighlightKind.Normal;
+    }
+
+    private sealed class LogReaderState
+    {
+        public string Path => _path;
+        public bool Initialized { get; set; }
+        public long Offset { get; set; }
+        public string PendingText { get; set; } = string.Empty;
+        public Decoder Decoder { get; private set; } = Encoding.UTF8.GetDecoder();
+        private readonly string _path;
+
+        public LogReaderState(string path)
+        {
+            _path = path;
+        }
+
+        public void Reset()
+        {
+            Offset = 0;
+            PendingText = string.Empty;
+            Decoder = Encoding.UTF8.GetDecoder();
+        }
+    }
+
+    private enum HighlightKind
+    {
+        Normal,
+        Timestamp,
+        Category,
+        Trace,
+        Debug,
+        Information,
+        Warning,
+        Error,
+        Critical
+    }
+
+    private readonly record struct HighlightSpan(int Start, int Length, HighlightKind Kind);
 }

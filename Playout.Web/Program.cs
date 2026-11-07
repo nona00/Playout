@@ -1,6 +1,7 @@
 using System.Net;
 using Playout.Web;
 using System.Net.Http.Headers;
+using System.Text.Json;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 string logPath = Path.Combine(
@@ -30,9 +31,17 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.MapGet("/api/sources", (WebMusicLibrary library) => Results.Ok(library.GetSources()));
 app.MapPost("/api/sources", (SourceRequest request, WebMusicLibrary library) =>
-    Run(() => library.AddSource(request.Path ?? string.Empty), () => Results.Ok(library.GetSources())));
+    Run(() =>
+    {
+        library.AddSource(request.Path ?? string.Empty);
+        app.Logger.LogInformation("Musikquelle hinzugefügt: {Path}", request.Path);
+    }, () => Results.Ok(library.GetSources())));
 app.MapDelete("/api/sources", (string path, WebMusicLibrary library) =>
-    Run(() => library.RemoveSource(path), () => Results.NoContent()));
+    Run(() =>
+    {
+        library.RemoveSource(path);
+        app.Logger.LogInformation("Musikquelle entfernt: {Path}", path);
+    }, () => Results.NoContent()));
 app.MapGet("/api/tracks", (WebMusicLibrary library, CancellationToken cancellationToken) =>
     Results.Ok(library.Scan(cancellationToken)));
 
@@ -42,7 +51,33 @@ app.MapMethods("/api/engine/{**path}", ["GET", "POST", "PUT"], async (
     IHttpClientFactory clientFactory,
     CancellationToken cancellationToken) =>
 {
+    string? trackPath = null;
+    if (HttpMethods.IsPost(context.Request.Method) && path.EndsWith("/load", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Request.EnableBuffering();
+        try
+        {
+            LoadAudioRequest? loadRequest = await context.Request.ReadFromJsonAsync<LoadAudioRequest>(cancellationToken);
+            trackPath = loadRequest?.Path;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+        finally
+        {
+            if (context.Request.Body.CanSeek)
+                context.Request.Body.Position = 0;
+        }
+    }
+
     HttpClient client = clientFactory.CreateClient("Engine");
+    string? action = DescribeEngineAction(context.Request.Method, path, trackPath);
+    if (action is not null && trackPath is null && TryGetDeckId(path, out string? deckId))
+    {
+        string? currentTrack = await ReadDeckTrackTitleAsync(client, deckId!, cancellationToken);
+        action = DescribeEngineAction(context.Request.Method, path, currentTrack: currentTrack);
+    }
+
     string query = context.Request.QueryString.Value ?? string.Empty;
     using HttpRequestMessage request = new(new HttpMethod(context.Request.Method), "api/" + path + query);
     if (context.Request.ContentLength > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
@@ -54,13 +89,22 @@ app.MapMethods("/api/engine/{**path}", ["GET", "POST", "PUT"], async (
     try
     {
         using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (action is not null)
+        {
+            if (response.IsSuccessStatusCode)
+                app.Logger.LogInformation("Aktion ausgeführt: {Action}", action);
+            else
+                app.Logger.LogWarning("Aktion fehlgeschlagen: {Action}; HTTP {StatusCode}", action, (int)response.StatusCode);
+        }
         context.Response.StatusCode = (int)response.StatusCode;
         if (response.Content.Headers.ContentType is not null)
             context.Response.ContentType = response.Content.Headers.ContentType.ToString();
         await response.Content.CopyToAsync(context.Response.Body, cancellationToken);
     }
-    catch (HttpRequestException)
+    catch (HttpRequestException exception)
     {
+        if (action is not null)
+            app.Logger.LogError(exception, "Aktion fehlgeschlagen: {Action}", action);
         context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         await context.Response.WriteAsJsonAsync(new { Error = "Die lokale Playout-Engine ist nicht erreichbar." }, cancellationToken);
     }
@@ -81,4 +125,74 @@ static IResult Run(Action action, Func<IResult> result)
     }
 }
 
+static string? DescribeEngineAction(string method, string path, string? trackPath = null, string? currentTrack = null)
+{
+    string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    if (HttpMethods.IsPut(method) && path.Equals("audio-routing", StringComparison.OrdinalIgnoreCase))
+        return "Audio-Routing geändert.";
+    if (!HttpMethods.IsPost(method))
+        return null;
+    if (path.Equals("audio/initialize", StringComparison.OrdinalIgnoreCase))
+        return "Audioausgabe initialisiert.";
+    if (path.Equals("audio/shutdown", StringComparison.OrdinalIgnoreCase))
+        return "Audioausgabe beendet.";
+    if (segments.Length < 3 || !segments[0].Equals("decks", StringComparison.OrdinalIgnoreCase))
+        return null;
+
+    string deck = Uri.UnescapeDataString(segments[1]);
+    return segments[2].ToLowerInvariant() switch
+    {
+        "load" => $"Titel geladen: {(string.IsNullOrWhiteSpace(trackPath) ? "unbekannt" : Path.GetFileName(trackPath))} in {deck}.",
+        "play" => $"Wiedergabe gestartet: {currentTrack ?? "kein Titel geladen"} ({deck}).",
+        "pause" => $"Wiedergabe pausiert: {currentTrack ?? "kein Titel geladen"} ({deck}).",
+        "stop" => $"Wiedergabe gestoppt: {currentTrack ?? "kein Titel geladen"} ({deck}).",
+        _ => null
+    };
+}
+
+static bool TryGetDeckId(string path, out string? deckId)
+{
+    string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    if (segments.Length >= 3 && segments[0].Equals("decks", StringComparison.OrdinalIgnoreCase))
+    {
+        deckId = Uri.UnescapeDataString(segments[1]);
+        return true;
+    }
+
+    deckId = null;
+    return false;
+}
+
+static async Task<string?> ReadDeckTrackTitleAsync(HttpClient client, string deckId, CancellationToken cancellationToken)
+{
+    try
+    {
+        using HttpResponseMessage response = await client.GetAsync("api/audio/status", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        JsonElement status = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        if (!status.TryGetProperty("decks", out JsonElement decks) || decks.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (JsonElement deck in decks.EnumerateArray())
+        {
+            if (deck.TryGetProperty("deckId", out JsonElement id) &&
+                string.Equals(id.GetString(), deckId, StringComparison.OrdinalIgnoreCase) &&
+                deck.TryGetProperty("path", out JsonElement path) &&
+                path.ValueKind == JsonValueKind.String)
+            {
+                string? fullPath = path.GetString();
+                return fullPath is null ? null : Path.GetFileName(fullPath);
+            }
+        }
+    }
+    catch (Exception exception) when (exception is HttpRequestException or JsonException)
+    {
+    }
+
+    return null;
+}
+
 internal sealed record SourceRequest(string? Path);
+internal sealed record LoadAudioRequest(string? Path);

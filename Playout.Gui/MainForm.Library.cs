@@ -58,6 +58,7 @@ internal sealed partial class MainForm
 
     private async void MainFormShown(object? sender, EventArgs e)
     {
+        PlayoutGuiLog.Write("Information", nameof(MainForm), "Playout gestartet.");
         guiStartedAt = DateTimeOffset.UtcNow;
         startupGraceTimer.Tick += (_, _) =>
         {
@@ -86,6 +87,8 @@ internal sealed partial class MainForm
 
     private void MainFormClosed(object? sender, FormClosedEventArgs e)
     {
+        PlayoutGuiLog.Write("Information", nameof(MainForm), "Playout wird beendet.");
+        logWindow?.Close();
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
         trayMenu.Dispose();
@@ -167,6 +170,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
+            PlayoutGuiLog.Write("Error", nameof(MainForm), "Engine konnte nicht gestartet werden.", exception);
             if (!IsDisposed) SetStatusError($"Engine konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingEngine = false; }
@@ -225,6 +229,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
+            PlayoutGuiLog.Write("Error", nameof(MainForm), "Weboberfläche konnte nicht gestartet werden.", exception);
             if (!IsDisposed) SetStatusError($"Weboberfläche konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingWeb = false; }
@@ -300,7 +305,8 @@ internal sealed partial class MainForm
                 $"{deckId} spielt gerade. Beim Laden wird der laufende Titel ersetzt. Fortfahren?",
                 "Titel ersetzen", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             await engine.LoadAsync(deckId, track.Path);
-        });
+            PlayoutGuiLog.Write("Information", "Engine", $"Titel geladen: {track.Title} in {deckId}.");
+        }, null);
     }
 
     private async Task PreviewSelectedAsync()
@@ -311,7 +317,8 @@ internal sealed partial class MainForm
         {
             await engine.LoadAsync("PFL", selectedTrack.Path);
             await engine.PlayAsync("PFL");
-        });
+            PlayoutGuiLog.Write("Information", "Engine", $"PFL-Vorhören gestartet: {selectedTrack.Title}.");
+        }, null);
     }
 
     private async Task LoadAndPlayInFreeDeckAsync()
@@ -327,7 +334,33 @@ internal sealed partial class MainForm
             if (free is null) throw new InvalidOperationException("Kein freier Ausspielschacht verfügbar.");
             await engine.LoadAsync(free.DeckId, selectedTrack.Path);
             await engine.PlayAsync(free.DeckId);
-        });
+            PlayoutGuiLog.Write("Information", "Engine", $"Titel abgespielt: {selectedTrack.Title} auf {free.DeckId}.");
+        }, null);
+    }
+
+    private Task RunDeckActionAsync(string deckId, string actionDescription)
+    {
+        return RunEngineActionAsync(async () =>
+        {
+            EngineAudioStatus status = await engine.GetStatusAsync();
+            string? path = status.Decks.FirstOrDefault(deck => deck.DeckId.Equals(deckId, StringComparison.OrdinalIgnoreCase))?.Path;
+
+            switch (actionDescription)
+            {
+                case "Wiedergabe gestartet":
+                    await engine.PlayAsync(deckId);
+                    break;
+                case "Wiedergabe pausiert":
+                    await engine.PauseAsync(deckId);
+                    break;
+                default:
+                    await engine.StopAsync(deckId);
+                    break;
+            }
+
+            string title = path is null ? "kein Titel geladen" : Path.GetFileName(path);
+            PlayoutGuiLog.Write("Information", "Engine", $"{actionDescription}: {title} ({deckId}).");
+        }, null);
     }
 
     private bool TryGetSelectedTrack(out MusicTrack? track)
@@ -361,6 +394,7 @@ internal sealed partial class MainForm
             if (MessageBox.Show(this, "Die zugeordneten Programmausgänge beider Decks werden auf das gewählte Kanalpaar gelegt. Andere Ausgänge bleiben unverändert. Überlappende Kanäle werden gemischt; auch PFL kann dadurch hörbar sein. Fortfahren?",
                 "Routing ändern", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             await engine.AssignDeckOutputsAsync(dialog.Mapping);
+            PlayoutGuiLog.Write("Information", "Engine", "Programmausgänge konfiguriert.");
         });
     }
 
@@ -376,6 +410,7 @@ internal sealed partial class MainForm
                 "PFL wird auf dieses Kanalpaar gelegt. Es sollte sich vom Programmkanal unterscheiden; gleiche Kanäle mischen Programm und PFL.");
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Mapping is null) return;
             await engine.AssignPflOutputAsync(dialog.Mapping);
+            PlayoutGuiLog.Write("Information", "Engine", "PFL-Ausgang konfiguriert.");
         });
     }
 
@@ -389,6 +424,7 @@ internal sealed partial class MainForm
                 routing.Outputs.Any(output => output.Id.Equals(deck.OutputId, StringComparison.OrdinalIgnoreCase) && output.Device is not null));
             if (!connected) throw new InvalidOperationException("Kein Deckausgang ist verbunden. Bitte zuerst 'Audio einrichten' wählen.");
             await engine.InitializeAsync();
+            PlayoutGuiLog.Write("Information", "Engine", "Audioausgabe initialisiert.");
         });
     }
 
@@ -396,14 +432,19 @@ internal sealed partial class MainForm
     {
         if (MessageBox.Show(this, "Die gesamte Wiedergabe der Engine wird beendet. Fortfahren?", "Audio beenden",
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-        await RunEngineActionAsync(engine.ShutdownAsync);
+        await RunEngineActionAsync(engine.ShutdownAsync, "Audioausgabe beendet.");
     }
 
-    private async Task RunEngineActionAsync(Func<Task> action)
+    private async Task RunEngineActionAsync(Func<Task> action, string? actionDescription = null)
     {
         if (commandInProgress || IsDisposed) return;
         commandInProgress = true;
-        try { await action(); }
+        try
+        {
+            await action();
+            if (actionDescription is not null)
+                PlayoutGuiLog.Write("Information", "Engine", actionDescription);
+        }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)
         {
             if (!IsDisposed) ShowError("Engine-Befehl fehlgeschlagen", exception);
@@ -455,7 +496,11 @@ internal sealed partial class MainForm
             (string.IsNullOrWhiteSpace(deck.Error) ? "" : $"\n{deck.Error}");
     }
 
-    private void ShowError(string title, Exception exception) => SetStatusError($"{title}: {exception.Message}");
+    private void ShowError(string title, Exception exception)
+    {
+        PlayoutGuiLog.Write("Error", nameof(MainForm), title, exception);
+        SetStatusError($"{title}: {exception.Message}");
+    }
 
     private void SetStatusError(string message, bool delayed = false)
     {

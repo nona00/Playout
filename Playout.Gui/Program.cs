@@ -9,6 +9,10 @@ internal static class Program
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
+        Application.ThreadException += (_, args) =>
+            PlayoutGuiLog.Write("Critical", "UI", "Nicht behandelte Ausnahme im UI-Thread.", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            PlayoutGuiLog.Write("Critical", "Application", "Nicht behandelte Ausnahme.", args.ExceptionObject as Exception);
         Application.Run(new MainForm());
     }
 }
@@ -23,6 +27,7 @@ internal sealed partial class MainForm : Form
     private readonly Icon trayIconImage;
     private readonly ContextMenuStrip trayMenu;
     private readonly NotifyIcon notifyIcon;
+    private PlayoutLogWindow? logWindow;
 
     public MainForm()
     {
@@ -31,6 +36,7 @@ internal sealed partial class MainForm : Form
         Icon = windowIcon;
         trayIconImage = (Icon)windowIcon.Clone();
         trayMenu = new ContextMenuStrip();
+        trayMenu.Items.Add("Log anzeigen", null, (_, _) => ShowLog());
         trayMenu.Items.Add("Playout anzeigen", null, (_, _) => RestoreFromTray());
         trayMenu.Items.Add("Beenden", null, (_, _) => Close());
         notifyIcon = new NotifyIcon
@@ -104,6 +110,18 @@ internal sealed partial class MainForm : Form
         Activate();
     }
 
+    private void ShowLog()
+    {
+        if (logWindow is null || logWindow.IsDisposed)
+            logWindow = new PlayoutLogWindow(PlayoutGuiLog.LogPath, windowIcon);
+
+        if (!logWindow.Visible)
+            logWindow.Show();
+        logWindow.WindowState = FormWindowState.Maximized;
+        logWindow.BringToFront();
+        logWindow.Activate();
+    }
+
     private static Control CreatePlaylistPanel()
     {
         Panel panel = CreatePanel();
@@ -147,7 +165,7 @@ internal sealed partial class MainForm : Form
         FlowLayoutPanel pfl = new() { Dock = DockStyle.Fill, WrapContents = false };
         pfl.Controls.Add(new Label { Text = "PFL", AutoSize = true, Padding = new Padding(0, 8, 8, 0), ForeColor = MutedColor });
         pfl.Controls.Add(pflStatus);
-        pfl.Controls.Add(CreateActionButton("Stopp", async () => await RunEngineActionAsync(() => engine.StopAsync("PFL"))));
+        pfl.Controls.Add(CreateActionButton("Stopp", async () => await RunDeckActionAsync("PFL", "Wiedergabe gestoppt")));
         browser.Controls.Add(pfl, 0, 2);
 
         musicList.Dock = DockStyle.Fill;
@@ -188,9 +206,9 @@ internal sealed partial class MainForm : Form
         status.TextAlign = ContentAlignment.MiddleCenter;
         status.ForeColor = MutedColor;
         FlowLayoutPanel buttons = new() { Dock = DockStyle.Bottom, Height = 42, WrapContents = false };
-        buttons.Controls.Add(CreateActionButton("Start", async () => await RunEngineActionAsync(() => engine.PlayAsync(deckId))));
-        buttons.Controls.Add(CreateActionButton("Pause", async () => await RunEngineActionAsync(() => engine.PauseAsync(deckId))));
-        buttons.Controls.Add(CreateActionButton("Stopp", async () => await RunEngineActionAsync(() => engine.StopAsync(deckId))));
+        buttons.Controls.Add(CreateActionButton("Start", async () => await RunDeckActionAsync(deckId, "Wiedergabe gestartet")));
+        buttons.Controls.Add(CreateActionButton("Pause", async () => await RunDeckActionAsync(deckId, "Wiedergabe pausiert")));
+        buttons.Controls.Add(CreateActionButton("Stopp", async () => await RunDeckActionAsync(deckId, "Wiedergabe gestoppt")));
         panel.Controls.Add(status);
         panel.Controls.Add(buttons);
         panel.Controls.Add(CreateHeading(title));
