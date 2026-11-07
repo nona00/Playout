@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
@@ -38,6 +39,9 @@ internal sealed class TrayFileLogger(string path, string category) : ILogger
         string message = formatter(state, exception);
         if (exception is not null)
             message += Environment.NewLine + exception;
+
+        if (logLevel == LogLevel.Information && category.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal))
+            logLevel = LogLevel.Debug;
 
         PlayoutLog.Write(path, logLevel.ToString(), category, message, exception);
     }
@@ -203,15 +207,31 @@ internal sealed class TrayContext : ApplicationContext
 
 internal sealed class TrayLogWindow : Form
 {
+    private const int WmSetRedraw = 0x000B;
+    private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmLineScroll = 0x00B6;
     private const int InitialTailBytes = 128 * 1024;
     private const int MaxBytesPerRead = 16 * 1024;
     private const int MaxVisibleCharacters = 400_000;
     private readonly RichTextBox _textBox = new();
     private readonly CheckBox _blackBackground = new() { Text = "Schwarzer Hintergrund", Checked = true, AutoSize = true };
+    private readonly CheckBox _autoScroll = new()
+    {
+        Text = "Auto-Scroll: Ein",
+        Checked = true,
+        AutoSize = true,
+        Appearance = Appearance.Button
+    };
+    private readonly ComboBox _levelFilter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 135 };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 500 };
     private readonly BackgroundWorker _reader = new();
     private readonly LogReaderState _readerState;
     private readonly List<HighlightSpan> _highlightSpans = [];
+    private readonly Queue<LogLine> _logLines = new();
+    private int _firstVisibleHighlightSpan;
+    private int _trimmedTextLength;
+    private int _bufferedLogLength;
+    private HighlightKind _lastLogKind = HighlightKind.Normal;
     private bool _closing;
 
     public TrayLogWindow(string logPath, string title, Icon? applicationIcon = null)
@@ -229,6 +249,11 @@ internal sealed class TrayLogWindow : Form
             Padding = new Padding(8, 6, 0, 0)
         };
         toolbar.Controls.Add(_blackBackground);
+        toolbar.Controls.Add(_autoScroll);
+        toolbar.Controls.Add(new Label { Text = "Typ:", AutoSize = true, Margin = new Padding(8, 8, 0, 0) });
+        _levelFilter.Items.AddRange(["Alle", "Trace", "Debug", "Information", "Warning", "Error", "Critical"]);
+        _levelFilter.SelectedIndex = 0;
+        toolbar.Controls.Add(_levelFilter);
         _textBox.Dock = DockStyle.Fill;
         _textBox.ReadOnly = true;
         _textBox.WordWrap = false;
@@ -243,6 +268,13 @@ internal sealed class TrayLogWindow : Form
             ApplyTheme();
             RecolorVisibleText();
         };
+        _autoScroll.CheckedChanged += (_, _) =>
+        {
+            _autoScroll.Text = _autoScroll.Checked ? "Auto-Scroll: Ein" : "Auto-Scroll: Aus";
+            if (_autoScroll.Checked)
+                ScrollToEnd();
+        };
+        _levelFilter.SelectedIndexChanged += (_, _) => RebuildVisibleText();
         _reader.DoWork += (_, args) => args.Result = ReadLogBatch((LogReaderState)args.Argument!);
         _reader.RunWorkerCompleted += (_, args) =>
         {
@@ -336,44 +368,152 @@ internal sealed class TrayLogWindow : Form
         if (text.Length == 0)
             return;
 
-        TrimVisibleText(text.Length);
-        string currentText = _textBox.Text;
-        int start = currentText.Length;
-        _textBox.SuspendLayout();
-        _textBox.SelectionStart = _textBox.TextLength;
-        _textBox.SelectionLength = 0;
-        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
-        _textBox.AppendText(text);
-        string renderedText = _textBox.Text;
-        AddHighlightSpans(renderedText[start..], start);
-        _textBox.SelectionStart = _textBox.TextLength;
-        _textBox.SelectionLength = 0;
-        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
-        _textBox.ScrollToCaret();
-        _textBox.ResumeLayout();
+        string displayText = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        StringBuilder visibleText = new();
+        int lineStart = 0;
+        while (lineStart < displayText.Length)
+        {
+            int lineEnd = displayText.IndexOf('\n', lineStart);
+            int lineAfter = lineEnd >= 0 ? lineEnd + 1 : displayText.Length;
+            int contentEnd = lineEnd >= 0 ? lineEnd : displayText.Length;
+            int levelStart = displayText.IndexOf('[', lineStart, contentEnd - lineStart);
+            int levelEnd = levelStart >= 0 ? displayText.IndexOf(']', levelStart, contentEnd - levelStart) : -1;
+
+            if (levelStart > lineStart && levelEnd > levelStart &&
+                TryGetLevelKind(displayText.Substring(levelStart + 1, levelEnd - levelStart - 1), out HighlightKind levelKind))
+                _lastLogKind = levelKind;
+
+            string lineText = displayText[lineStart..lineAfter];
+            _logLines.Enqueue(new LogLine(lineText, _lastLogKind));
+            _bufferedLogLength += lineText.Length;
+            if (IsVisibleLogKind(_lastLogKind))
+                visibleText.Append(lineText);
+
+            lineStart = lineAfter;
+        }
+
+        int removedVisibleLines = 0;
+        while (_bufferedLogLength > MaxVisibleCharacters && _logLines.Count > 0)
+        {
+            LogLine removedLine = _logLines.Dequeue();
+            _bufferedLogLength -= removedLine.Text.Length;
+            if (IsVisibleLogKind(removedLine.Kind))
+                removedVisibleLines++;
+        }
+
+        RemoveVisibleLines(removedVisibleLines);
+        if (visibleText.Length > 0)
+            AppendVisibleText(visibleText.ToString());
     }
 
-    private void TrimVisibleText(int incomingLength)
+    private bool IsVisibleLogKind(HighlightKind kind)
     {
-        int removeAtLeast = _textBox.TextLength + incomingLength - MaxVisibleCharacters;
-        if (removeAtLeast <= 0)
+        return _levelFilter.SelectedIndex == 0 ||
+            Enum.TryParse((string?)_levelFilter.SelectedItem, out HighlightKind selectedKind) && selectedKind == kind;
+    }
+
+    private void RebuildVisibleText()
+    {
+        StringBuilder visibleText = new();
+        foreach (LogLine line in _logLines)
+        {
+            if (IsVisibleLogKind(line.Kind))
+                visibleText.Append(line.Text);
+        }
+
+        _textBox.Clear();
+        _highlightSpans.Clear();
+        _firstVisibleHighlightSpan = 0;
+        _trimmedTextLength = 0;
+        if (visibleText.Length > 0)
+            AppendVisibleText(visibleText.ToString());
+    }
+
+    private void RemoveVisibleLines(int lineCount)
+    {
+        if (lineCount <= 0 || _textBox.TextLength == 0)
             return;
 
-        int newline = _textBox.Text.IndexOf('\n', removeAtLeast);
-        int removeCount = newline >= 0 ? newline + 1 : removeAtLeast;
+        int removeCount = _textBox.GetFirstCharIndexFromLine(lineCount);
+        if (removeCount < 0 || removeCount > _textBox.TextLength)
+            removeCount = _textBox.TextLength;
+        if (removeCount <= 0)
+            return;
+
         _textBox.Select(0, removeCount);
         _textBox.SelectedText = string.Empty;
+        _trimmedTextLength += removeCount;
+        TrimHighlightSpans();
+    }
 
-        for (int i = _highlightSpans.Count - 1; i >= 0; i--)
+    private void AppendVisibleText(string displayText)
+    {
+        int firstNewLine = _textBox.GetLineFromCharIndex(_textBox.TextLength);
+        IntPtr handle = _textBox.Handle;
+        int firstVisibleLine = SendMessage(handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        int selectionStart = _textBox.SelectionStart;
+        int selectionLength = _textBox.SelectionLength;
+        SendMessage(handle, WmSetRedraw, IntPtr.Zero, IntPtr.Zero);
+        _textBox.SuspendLayout();
+
+        try
         {
-            HighlightSpan span = _highlightSpans[i];
-            int end = span.Start + span.Length;
-            if (end <= removeCount)
-                _highlightSpans.RemoveAt(i);
-            else if (span.Start < removeCount)
-                _highlightSpans[i] = span with { Start = 0, Length = end - removeCount };
+            _textBox.SelectionStart = _textBox.TextLength;
+            _textBox.SelectionLength = 0;
+            _textBox.SelectionColor = GetColor(HighlightKind.Normal);
+            _textBox.AppendText(displayText);
+            AddHighlightSpans(displayText, firstNewLine);
+            if (_autoScroll.Checked)
+            {
+                ScrollToEnd();
+            }
             else
-                _highlightSpans[i] = span with { Start = span.Start - removeCount };
+            {
+                _textBox.Select(Math.Min(selectionStart, _textBox.TextLength), selectionLength);
+                int currentFirstVisibleLine = SendMessage(handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
+                SendMessage(handle, EmLineScroll, IntPtr.Zero, new IntPtr(firstVisibleLine - currentFirstVisibleLine));
+            }
+        }
+        finally
+        {
+            _textBox.ResumeLayout();
+            SendMessage(handle, WmSetRedraw, new IntPtr(1), IntPtr.Zero);
+            _textBox.Invalidate();
+        }
+    }
+
+    private void ScrollToEnd()
+    {
+        _textBox.SelectionStart = _textBox.TextLength;
+        _textBox.SelectionLength = 0;
+        _textBox.ScrollToCaret();
+    }
+
+    private void TrimHighlightSpans()
+    {
+        while (_firstVisibleHighlightSpan < _highlightSpans.Count)
+        {
+            HighlightSpan span = _highlightSpans[_firstVisibleHighlightSpan];
+            int end = span.Start + span.Length;
+            if (end <= _trimmedTextLength)
+                _firstVisibleHighlightSpan++;
+            else if (span.Start < _trimmedTextLength)
+            {
+                _highlightSpans[_firstVisibleHighlightSpan] = span with
+                {
+                    Start = _trimmedTextLength,
+                    Length = end - _trimmedTextLength
+                };
+                break;
+            }
+            else
+                break;
+        }
+
+        if (_firstVisibleHighlightSpan >= 1024 && _firstVisibleHighlightSpan * 2 >= _highlightSpans.Count)
+        {
+            _highlightSpans.RemoveRange(0, _firstVisibleHighlightSpan);
+            _firstVisibleHighlightSpan = 0;
         }
     }
 
@@ -383,31 +523,37 @@ internal sealed class TrayLogWindow : Form
         _textBox.ForeColor = _blackBackground.Checked ? Color.Gainsboro : Color.Black;
     }
 
-    private void AddHighlightSpans(string text, int offset)
+    private void AddHighlightSpans(string text, int firstLine)
     {
         int firstNewSpan = _highlightSpans.Count;
-        _highlightSpans.Add(new HighlightSpan(offset, text.Length, HighlightKind.Normal));
         int lineStart = 0;
+        int lineNumber = firstLine;
 
         while (lineStart < text.Length)
         {
+            int richLineStart = _textBox.GetFirstCharIndexFromLine(lineNumber++);
             int lineEnd = text.IndexOf('\n', lineStart);
             if (lineEnd < 0)
                 lineEnd = text.Length;
             int levelStart = lineEnd > lineStart ? text.IndexOf('[', lineStart, lineEnd - lineStart) : -1;
             int levelEnd = levelStart >= 0 ? text.IndexOf(']', levelStart, lineEnd - levelStart) : -1;
-            if (levelStart > lineStart && levelEnd > levelStart &&
+            if (richLineStart >= 0 && levelStart > lineStart && levelEnd > levelStart &&
                 TryGetLevelKind(text.Substring(levelStart + 1, levelEnd - levelStart - 1), out HighlightKind levelKind))
             {
-                _highlightSpans.Add(new HighlightSpan(offset + lineStart, levelStart - lineStart, HighlightKind.Timestamp));
-                _highlightSpans.Add(new HighlightSpan(offset + levelStart, levelEnd - levelStart + 1, levelKind));
+                int absoluteLineStart = _trimmedTextLength + richLineStart;
+                int absoluteLevelStart = absoluteLineStart + levelStart - lineStart;
+                _highlightSpans.Add(new HighlightSpan(absoluteLineStart, levelStart - lineStart, HighlightKind.Timestamp));
+                _highlightSpans.Add(new HighlightSpan(absoluteLevelStart, levelEnd - levelStart + 1, levelKind));
 
                 int categoryStart = levelEnd + 2;
                 int categoryEnd = categoryStart < lineEnd
                     ? text.IndexOf(':', categoryStart, lineEnd - categoryStart)
                     : -1;
                 if (categoryEnd > categoryStart)
-                    _highlightSpans.Add(new HighlightSpan(offset + categoryStart, categoryEnd - categoryStart, HighlightKind.Category));
+                    _highlightSpans.Add(new HighlightSpan(
+                        absoluteLineStart + categoryStart - lineStart,
+                        categoryEnd - categoryStart,
+                        HighlightKind.Category));
             }
 
             lineStart = lineEnd + 1;
@@ -418,6 +564,8 @@ internal sealed class TrayLogWindow : Form
 
     private void RecolorVisibleText()
     {
+        _textBox.Select(0, _textBox.TextLength);
+        _textBox.SelectionColor = GetColor(HighlightKind.Normal);
         RecolorSpans(0);
         _textBox.SelectionStart = _textBox.TextLength;
         _textBox.SelectionLength = 0;
@@ -426,16 +574,20 @@ internal sealed class TrayLogWindow : Form
 
     private void RecolorSpans(int startIndex)
     {
-        for (int i = startIndex; i < _highlightSpans.Count; i++)
+        for (int i = Math.Max(startIndex, _firstVisibleHighlightSpan); i < _highlightSpans.Count; i++)
         {
             HighlightSpan span = _highlightSpans[i];
-            if (span.Length <= 0 || span.Start + span.Length > _textBox.TextLength)
+            int selectionStart = span.Start - _trimmedTextLength;
+            if (span.Length <= 0 || selectionStart < 0 || selectionStart + span.Length > _textBox.TextLength)
                 continue;
 
-            _textBox.Select(span.Start, span.Length);
+            _textBox.Select(selectionStart, span.Length);
             _textBox.SelectionColor = GetColor(span.Kind);
         }
     }
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
 
     private Color GetColor(HighlightKind kind) => kind switch
     {
@@ -498,5 +650,6 @@ internal sealed class TrayLogWindow : Form
         Critical
     }
 
+    private readonly record struct LogLine(string Text, HighlightKind Kind);
     private readonly record struct HighlightSpan(int Start, int Length, HighlightKind Kind);
 }
