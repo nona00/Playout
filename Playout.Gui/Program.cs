@@ -19,10 +19,33 @@ internal sealed partial class MainForm : Form
     private static readonly Color PanelColor = Color.FromArgb(29, 34, 45);
     private static readonly Color TextColor = Color.FromArgb(235, 238, 245);
     private static readonly Color MutedColor = Color.FromArgb(152, 163, 180);
+    private readonly Icon windowIcon;
+    private readonly Icon trayIconImage;
+    private readonly ContextMenuStrip trayMenu;
+    private readonly NotifyIcon notifyIcon;
 
     public MainForm()
     {
         Text = "Playout";
+        windowIcon = TrayIcon.Create('P', Color.FromArgb(119, 78, 160));
+        Icon = windowIcon;
+        trayIconImage = (Icon)windowIcon.Clone();
+        trayMenu = new ContextMenuStrip();
+        trayMenu.Items.Add("Playout anzeigen", null, (_, _) => RestoreFromTray());
+        trayMenu.Items.Add("Beenden", null, (_, _) => Close());
+        notifyIcon = new NotifyIcon
+        {
+            Icon = trayIconImage,
+            Text = "Playout",
+            ContextMenuStrip = trayMenu,
+            Visible = true
+        };
+        notifyIcon.MouseClick += (_, args) =>
+        {
+            if (args.Button == MouseButtons.Left)
+                RestoreFromTray();
+        };
+        notifyIcon.DoubleClick += (_, _) => RestoreFromTray();
         MinimumSize = new Size(1000, 650);
         Size = new Size(1440, 900);
         WindowState = FormWindowState.Maximized;
@@ -70,6 +93,15 @@ internal sealed partial class MainForm : Form
         Controls.Add(CreateEngineToolbar());
         Shown += MainFormShown;
         FormClosed += MainFormClosed;
+    }
+
+    private void RestoreFromTray()
+    {
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        Show();
+        BringToFront();
+        Activate();
     }
 
     private static Control CreatePlaylistPanel()

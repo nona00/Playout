@@ -7,6 +7,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Common\TrayIcon.cs" Link="TrayIcon.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Remove="Playout.Engine\**" />
     <EmbeddedResource Remove="Playout.Engine\**" />
     <None Remove="Playout.Engine\**" />

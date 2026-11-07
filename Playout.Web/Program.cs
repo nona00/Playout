@@ -1,15 +1,14 @@
 using System.Net;
 using Playout.Web;
-using Microsoft.Extensions.Logging.Console;
 using System.Net.Http.Headers;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+string logPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "Playout", "Logs", "Web.log");
+using TrayFileLoggerProvider fileLogger = new(logPath);
 builder.Logging.ClearProviders();
-builder.Logging.AddSimpleConsole(options =>
-{
-    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
-    options.SingleLine = true;
-});
+builder.Logging.AddProvider(fileLogger);
 builder.WebHost.UseUrls("http://127.0.0.1:5188");
 builder.Services.AddHttpClient("Engine", client =>
 {
@@ -22,6 +21,7 @@ string sourcesPath = Path.Combine(
 builder.Services.AddSingleton(new WebMusicLibrary(sourcesPath));
 
 WebApplication app = builder.Build();
+using TrayHost tray = new("W", "Playout Web", logPath, app.Lifetime.StopApplication, "http://127.0.0.1:5188");
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {

@@ -86,6 +86,12 @@ internal sealed partial class MainForm
 
     private void MainFormClosed(object? sender, FormClosedEventArgs e)
     {
+        notifyIcon.Visible = false;
+        notifyIcon.Dispose();
+        trayMenu.Dispose();
+        trayIconImage.Dispose();
+        Icon = null;
+        windowIcon.Dispose();
         statusTimer.Stop();
         statusTimer.Dispose();
         startupGraceTimer.Stop();
