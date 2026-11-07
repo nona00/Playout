@@ -288,9 +288,10 @@ internal sealed partial class MainForm
     private async Task PreviewSelectedAsync()
     {
         if (!TryGetSelectedTrack(out MusicTrack? track)) return;
+        MusicTrack selectedTrack = track!;
         await RunEngineActionAsync(async () =>
         {
-            await engine.LoadAsync("PFL", track.Path);
+            await engine.LoadAsync("PFL", selectedTrack.Path);
             await engine.PlayAsync("PFL");
         });
     }
@@ -298,6 +299,7 @@ internal sealed partial class MainForm
     private async Task LoadAndPlayInFreeDeckAsync()
     {
         if (!TryGetSelectedTrack(out MusicTrack? track)) return;
+        MusicTrack selectedTrack = track!;
         await RunEngineActionAsync(async () =>
         {
             EngineAudioStatus status = await engine.GetStatusAsync();
@@ -305,7 +307,7 @@ internal sealed partial class MainForm
                 (deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase) || deck.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase)) &&
                 deck.Path is null);
             if (free is null) throw new InvalidOperationException("Kein freier Ausspielschacht verfügbar.");
-            await engine.LoadAsync(free.DeckId, track.Path);
+            await engine.LoadAsync(free.DeckId, selectedTrack.Path);
             await engine.PlayAsync(free.DeckId);
         });
     }
