@@ -2,7 +2,7 @@
 body { margin: 0; min-height: 100vh; background: #11141c; color: #ebeff5; font: 16px "Segoe UI", sans-serif; }
 header { height: 56px; padding: 10px 18px; display: flex; align-items: center; gap: 18px; background: #1d222d; border-bottom: 1px solid #343b4b; }
 h1 { margin: 0; font-size: 20px; } #engine-status { color: #98a3b4; flex: 1; }
-.app-error { margin: 10px 12px 0; padding: 10px 12px; border: 1px solid #c45151; border-radius: 6px; background: #3a1f24; color: #ffb5b5; }
+#engine-status.error { color: #ff4d4d !important; font-weight: 700; }
 button { border: 0; border-radius: 5px; background: #3d76c8; color: #fff; padding: 7px 12px; cursor: pointer; } button:hover { background: #5289d7; } .icon-button { font-size: 20px; padding: 3px 11px; }
 main { height: calc(100vh - 56px); min-height: 520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 220px; gap: 12px; padding: 12px; }
 .panel { min-width: 0; min-height: 0; padding: 16px; background: #1d222d; border-radius: 7px; display: flex; flex-direction: column; gap: 10px; } h2 { margin: 0; color: #98a3b4; font-size: 14px; letter-spacing: .05em; } h3 { margin: 20px 0 6px; }

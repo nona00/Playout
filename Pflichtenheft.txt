@@ -1,0 +1,55 @@
+Zusammenfassung: Mehrkanal-Playout-System
+Ziel und Architektur
+Ein modernes Playout-System mit bass.dll für die Audioausgabe:
+•	Die Playout-Engine läuft als separater Prozess und spielt unabhängig von verbundenen Bedienoberflächen weiter.
+•	Es gibt eine WinForms-Anwendung und eine separate Webanwendung.
+•	Beide Oberflächen sollen dieselbe Engine bedienen und deren aktuellen Zustand anzeigen.
+•	Planung, Benutzer und Einstellungen sollen in einer SQL-Datenbank gespeichert werden.
+Oberfläche
+Gewünschte Anordnung:
+•	Oben links: Spielliste.
+•	Oben rechts: Musik-Recherche und CUE-Browser.
+•	Unten: Zwei Ausspielschächte; dazwischen eine AOT-Anzeige.
+Das Design soll sehr modern sein. Eine grafische Vorlage wurde übermittelt, war im bisherigen Chat jedoch nur als schwarze Fläche erkennbar.
+Audio und CUE
+•	Mindestens vier unabhängige Stereo-Ausgänge, erweiterbar.
+•	Der CUE-Browser soll über einen separaten PFL-Ausgang vorhören.
+•	Die Zuordnung von Ausspielschächten und Ausgängen soll konfigurierbar sein.
+•	Noch offen: Sind die vier Stereo-Ausgänge inklusive PFL oder sind vier Programmausgänge plus PFL gemeint? Werden separate Geräte oder Kanäle eines Mehrkanalinterfaces verwendet?
+Spiellisten und AOT
+•	Spiellisten sollen in einem Raster aus Tagen und Stunden definiert werden.
+•	Die Bestückung mit Musiktiteln erfolgt über die Weboberfläche.
+•	Für jedes Spiellistenelement kann optional eine AOT-Uhrzeit definiert werden. Das Datum ergibt sich aus der Spielliste.
+•	Die AOT-Anzeige zeigt die verbleibende Zeit bis zum Abspielen an.
+•	Für AOT sind folgende Verhaltensweisen erforderlich:
+•	Überblenden
+•	Harter Stopp
+•	Warten
+Als Arbeitsdefinition wurde vorgeschlagen: Bei „Warten“ endet zunächst der laufende Titel; bei „Überblenden“ laufen Aus- und Einblendung gleichzeitig. Details wie Überblenddauer und Behandlung verspäteter AOTs sind noch festzulegen.
+Übernahme von Spiellistenänderungen
+Es soll zwei Modi geben:
+1.	Automatisch: Änderungen werden von der Engine geladen.
+2.	Mit Bestätigung: Eine Änderung wird optisch angezeigt und erst nach Bestätigung übernommen.
+Bestätigen darf nur die Person, die aktuell die Ausspielung bedient. Vorgeschlagen wurde eine Versionierung, damit gleichzeitige Bearbeitungen erkannt und unbeabsichtigtes Überschreiben verhindert werden.
+Musikquellen und Import
+•	Musiktitel sollen aus Ordnern importiert werden können.
+•	Es soll mehrere Quellen geben.
+•	Vorgeschlagen: Metadaten und Dateireferenzen in der Datenbank speichern; die Audiodateien verbleiben in den Quellordnern.
+•	Importläufe sollen bekannte Dateien aktualisieren und fehlende oder fehlerhafte Dateien erkennbar machen.
+Benutzerverwaltung
+Eine zentrale Benutzerverwaltung soll für Web und WinForms gelten. Als mögliche Rollen wurden vorgeschlagen:
+•	Administration: Benutzer und Systemeinstellungen verwalten.
+•	Planung: Musik importieren und Spiellisten bearbeiten.
+•	Ausspielung: Playout bedienen.
+•	Lesender Zugriff: Status und Spiellisten ansehen.
+Die aktuelle Bedienverantwortung ist von der Rolle zu unterscheiden: Nur die zuständige Person darf ausstehende Änderungen bestätigen. Übergabe der Verantwortung und Verhalten bei Verbindungsverlust sind noch zu definieren.
+Datenbank
+Unterstützt werden sollen:
+•	SQLite
+•	SQL Server Express
+•	MySQL
+Vorgeschlagen wurde Entity Framework Core mit passenden Providern und getrennt verwalteten Migrationen. Gespeichert werden sollen insbesondere Benutzer, Musikmetadaten, Quellen, Spiellisten, AOT-Einstellungen, Audio-Routing und für den Wiederanlauf benötigte Zustände.
+Bisheriger Stand
+•	Es wurde ein kleiner Vorschlag für eine unabhängige AOT-Entscheidungslogik gezeigt.
+•	Es wurden keine Projektdateien angelegt oder geändert.
+•	Das gewünschte Projekt D:\Coding\Playout\Playout.Gui.csproj konnte im bisherigen Kontext nicht geöffnet oder gelesen werden.

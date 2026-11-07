@@ -11,4 +11,8 @@
     <EmbeddedResource Remove="Playout.Engine\**" />
     <None Remove="Playout.Engine\**" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Playout.Engine\Playout.Engine.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Playout.Web\Playout.Web.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
 </Project>

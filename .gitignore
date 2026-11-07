@@ -13,3 +13,7 @@
 /Playout.Gui.Tests/obj
 /Playout.Web/bin/Debug
 /Playout.Web/obj
+/Tests.Engine/bin
+/Tests.Engine/obj
+/Tests.Gui/bin
+/Tests.Gui/obj

@@ -26,7 +26,10 @@ internal sealed partial class MainForm
     private readonly Label deck2Status = new();
     private readonly Label pflStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(0, 8, 8, 0), Text = "PFL nicht verbunden" };
     private readonly System.Windows.Forms.Timer statusTimer = new() { Interval = 2000 };
+    private readonly System.Windows.Forms.Timer startupGraceTimer = new() { Interval = 5000 };
     private readonly CancellationTokenSource lifetime = new();
+    private DateTimeOffset guiStartedAt;
+    private bool statusHasError;
     private bool scanning;
     private bool polling;
     private bool commandInProgress;
@@ -55,6 +58,18 @@ internal sealed partial class MainForm
 
     private async void MainFormShown(object? sender, EventArgs e)
     {
+        guiStartedAt = DateTimeOffset.UtcNow;
+        startupGraceTimer.Tick += (_, _) =>
+        {
+            startupGraceTimer.Stop();
+            if (statusHasError) engineStatus.ForeColor = Color.IndianRed;
+        };
+        startupGraceTimer.Start();
+        statusTimer.Tick += async (_, _) => await RefreshEngineStatusAsync();
+        statusTimer.Start();
+        Task engineStartup = EnsureEngineRunningAsync();
+        Task webStartup = EnsureWebRunningAsync();
+
         try
         {
             sources.AddRange(library.LoadSources());
@@ -63,10 +78,7 @@ internal sealed partial class MainForm
         {
             ShowError("Musikquellen konnten nicht geladen werden", exception);
         }
-        statusTimer.Tick += async (_, _) => await RefreshEngineStatusAsync();
-        statusTimer.Start();
-        await EnsureEngineRunningAsync();
-        await EnsureWebRunningAsync();
+        await Task.WhenAll(engineStartup, webStartup);
         Task statusRefresh = RefreshEngineStatusAsync();
         await RefreshMusicAsync();
         await statusRefresh;
@@ -76,6 +88,8 @@ internal sealed partial class MainForm
     {
         statusTimer.Stop();
         statusTimer.Dispose();
+        startupGraceTimer.Stop();
+        startupGraceTimer.Dispose();
         lifetime.Cancel();
         engine.Dispose();
     }
@@ -127,14 +141,7 @@ internal sealed partial class MainForm
 
     private async Task EnsureEngineRunningAsync()
     {
-        try
-        {
-            await engine.GetStatusAsync();
-            return;
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
-        {
-        }
+        if (await IsEngineRunningAsync()) return;
 
         if (startingEngine) return;
         startingEngine = true;
@@ -145,14 +152,7 @@ internal sealed partial class MainForm
             while (DateTime.UtcNow < deadline && !lifetime.IsCancellationRequested)
             {
                 await Task.Delay(250, lifetime.Token);
-                try
-                {
-                    await engine.GetStatusAsync();
-                    return;
-                }
-                catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
-                {
-                }
+                if (await IsEngineRunningAsync()) return;
             }
             throw new InvalidOperationException("Die gestartete Engine antwortet nicht auf http://127.0.0.1:5187.");
         }
@@ -161,7 +161,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            if (!IsDisposed) ShowError("Engine konnte nicht gestartet werden", exception);
+            if (!IsDisposed) SetStatusError($"Engine konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingEngine = false; }
     }
@@ -186,6 +186,18 @@ internal sealed partial class MainForm
         if (process is null) throw new InvalidOperationException("Der Engine-Prozess konnte nicht erstellt werden.");
     }
 
+    private static async Task<bool> IsEngineRunningAsync()
+    {
+        using HttpClient client = new() { Timeout = TimeSpan.FromMilliseconds(500) };
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync("http://127.0.0.1:5187/api/status");
+            return response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
+    }
+
     private async Task EnsureWebRunningAsync()
     {
         if (await IsWebRunningAsync()) return;
@@ -207,7 +219,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            if (!IsDisposed) ShowError("Weboberfläche konnte nicht gestartet werden", exception);
+            if (!IsDisposed) SetStatusError($"Weboberfläche konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingWeb = false; }
     }
@@ -405,6 +417,8 @@ internal sealed partial class MainForm
         {
             EngineAudioStatus status = await engine.GetStatusAsync();
             if (IsDisposed) return;
+            statusHasError = false;
+            engineStatus.ForeColor = TextColor;
             string? error = status.Devices.Select(device => device.Error).FirstOrDefault(value => !string.IsNullOrEmpty(value));
             engineStatus.Text = error is not null ? $"Audiofehler: {error}" : status.Initialized ? "Engine: Audio aktiv" : "Engine verbunden – Audio nicht gestartet";
             UpdateDeckStatus(deck1Status, status.Decks.FirstOrDefault(deck => deck.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase)));
@@ -414,7 +428,7 @@ internal sealed partial class MainForm
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)
         {
             if (IsDisposed) return;
-            engineStatus.Text = "Engine nicht erreichbar – bitte separat starten";
+            SetStatusError("Engine nicht erreichbar", delayed: true);
             deck1Status.Text = deck2Status.Text = "Engine nicht verbunden";
             pflStatus.Text = "PFL: Engine nicht verbunden";
         }
@@ -435,6 +449,14 @@ internal sealed partial class MainForm
             (string.IsNullOrWhiteSpace(deck.Error) ? "" : $"\n{deck.Error}");
     }
 
-    private void ShowError(string title, Exception exception) =>
-        MessageBox.Show(this, exception.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    private void ShowError(string title, Exception exception) => SetStatusError($"{title}: {exception.Message}");
+
+    private void SetStatusError(string message, bool delayed = false)
+    {
+        statusHasError = true;
+        engineStatus.Text = message;
+        engineStatus.ForeColor = delayed && DateTimeOffset.UtcNow - guiStartedAt < TimeSpan.FromSeconds(5)
+            ? MutedColor
+            : Color.IndianRed;
+    }
 }

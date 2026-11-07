@@ -1,17 +1,24 @@
 const engine = '/api/engine/';
 let tracks = [], selected = null;
 const $ = selector => document.querySelector(selector);
-const appError = $('#app-error');
+const startupTime = Date.now();
+let engineUnavailable = false;
 
 function setAppError(message) {
   if (!message) return;
-  appError.textContent = message;
-  appError.hidden = false;
+  $('#engine-status').textContent = message;
+  $('#engine-status').classList.add('error');
 }
 
 function clearAppError() {
-  appError.hidden = true;
-  appError.textContent = '';
+  $('#engine-status').classList.remove('error');
+}
+
+function renderEngineUnavailable() {
+  const status = $('#engine-status');
+  const graceElapsed = Date.now() - startupTime >= 5000;
+  status.textContent = graceElapsed ? 'Engine nicht erreichbar' : 'Engine startet …';
+  status.classList.toggle('error', graceElapsed);
 }
 
 async function request(url, options = {}) {
@@ -50,6 +57,7 @@ async function refreshTracks() {
 async function refreshStatus() {
   try {
     const status = await engineRequest('audio/status');
+    engineUnavailable = false;
     clearAppError();
     $('#engine-status').textContent = status.initialized ? 'Engine: Audio aktiv' : 'Engine verbunden - Audio nicht gestartet';
     const deck = id => status.decks.find(item => item.deckId === id);
@@ -80,7 +88,6 @@ async function loadAndPlayDeck(deckId) {
 function showError(message) {
   $('#settings-error').textContent = message;
   setAppError(message);
-  if (!$('#settings-dialog').open) alert(message);
 }
 async function refreshSources() { const sources = await request('/api/sources'); const list = $('#sources'); list.replaceChildren(); sources.forEach(path => { const item = document.createElement('li'); item.className = 'source'; const label = document.createElement('span'); label.textContent = path; const remove = document.createElement('button'); remove.textContent = 'Entfernen'; remove.onclick = async () => { await run(async () => { await request(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await refreshSources(); await refreshTracks(); }); }; item.append(label, remove); list.append(item); }); }
 
@@ -103,6 +110,7 @@ $('#search').oninput = renderTracks;
 
 window.addEventListener('error', event => setAppError(`JavaScript-Fehler: ${event.message}`));
 window.addEventListener('unhandledrejection', event => setAppError(`Fehler: ${event.reason?.message ?? event.reason ?? 'Unbekannt'}`));
+window.setTimeout(() => { if (engineUnavailable) renderEngineUnavailable(); }, 5000);
 
 async function bootstrap() {
   try
