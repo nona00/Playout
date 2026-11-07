@@ -25,6 +25,7 @@ internal sealed partial class MainForm : Form
         Text = "Playout";
         MinimumSize = new Size(1000, 650);
         Size = new Size(1440, 900);
+        WindowState = FormWindowState.Maximized;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = BackgroundColor;
         ForeColor = TextColor;

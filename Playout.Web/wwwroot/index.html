@@ -4,14 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Playout</title>
-  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site.css?v=5">
 </head>
 <body>
   <header>
     <h1>Playout</h1>
-    <span id="engine-status">Engine wird geprüft …</span>
-    <button id="settings-button" class="icon-button" title="Einstellungen" aria-label="Einstellungen">?</button>
+    <span id="engine-status">Engine wird gepr&#252;ft &#8230;</span>
+    <button id="settings-button" class="icon-button" title="Einstellungen" aria-label="Einstellungen">&#9881;</button>
   </header>
+  <div id="app-error" class="app-error" role="alert" hidden></div>
   <main>
     <section class="panel playlist"><h2>SPIELLISTE</h2><p class="placeholder">Spiellistenplanung folgt.</p></section>
     <section class="panel browser">
@@ -21,26 +22,32 @@
       <div id="tracks" class="track-list" aria-label="Musiksuche"></div>
       <span id="library-status"></span>
     </section>
-    <section class="panel deck"><h2>AUSSPIELSCHACHT 1</h2><div id="deck-1-status" class="deck-status">Nicht initialisiert</div><div><button data-deck="Deck 1" data-action="play">Start</button><button data-deck="Deck 1" data-action="pause">Pause</button><button data-deck="Deck 1" data-action="stop">Stopp</button></div></section>
-    <section class="panel aot"><h2>AOT</h2><strong>--:--:--</strong></section>
-    <section class="panel deck"><h2>AUSSPIELSCHACHT 2</h2><div id="deck-2-status" class="deck-status">Nicht initialisiert</div><div><button data-deck="Deck 2" data-action="play">Start</button><button data-deck="Deck 2" data-action="pause">Pause</button><button data-deck="Deck 2" data-action="stop">Stopp</button></div></section>
+    <div class="outputs">
+      <section class="panel deck"><h2>AUSSPIELSCHACHT 1</h2><div id="deck-1-status" class="deck-status">Nicht initialisiert</div><div><button data-deck="Deck 1" data-action="play">Start</button><button data-deck="Deck 1" data-action="pause">Pause</button><button data-deck="Deck 1" data-action="stop">Stopp</button></div></section>
+      <section class="panel aot"><h2>AOT</h2><strong>--:--:--</strong></section>
+      <section class="panel deck"><h2>AUSSPIELSCHACHT 2</h2><div id="deck-2-status" class="deck-status">Nicht initialisiert</div><div><button data-deck="Deck 2" data-action="play">Start</button><button data-deck="Deck 2" data-action="pause">Pause</button><button data-deck="Deck 2" data-action="stop">Stopp</button></div></section>
+    </div>
   </main>
   <dialog id="settings-dialog">
     <form method="dialog">
-      <div class="dialog-header"><h2>Einstellungen</h2><button value="cancel" aria-label="Schließen">×</button></div>
+      <div class="dialog-header"><h2>Einstellungen</h2><button value="cancel" aria-label="Schlie&#223;en">&times;</button></div>
       <h3>Musikquellen</h3>
-      <p>Ordnerpfade gelten auf dem Computer, auf dem diese Webanwendung ausgeführt wird.</p>
-      <div class="source-add"><input id="source-path" placeholder="C:\Musik"><button id="add-source" type="button">Hinzufügen</button></div>
+      <p>Ordnerpfade gelten auf dem Computer, auf dem diese Webanwendung ausgef&#252;hrt wird.</p>
+      <div class="source-add"><input id="source-path" placeholder="C:\Musik"><button id="add-source" type="button">Hinzuf&#252;gen</button></div>
       <ul id="sources"></ul>
       <button id="scan" type="button">Musikquellen neu einlesen</button>
       <h3>Audio</h3>
-      <p>Die Kanalzuordnung wird in der WinForms-Oberfläche eingerichtet. Die hier verfügbaren Befehle steuern den bestehenden Routingzustand.</p>
+      <p>Die Kanalzuordnung wird in der WinForms-Oberfl&#228;che eingerichtet. Die hier verf&#252;gbaren Befehle steuern den bestehenden Routingzustand.</p>
       <button id="audio-start" type="button">Audio starten</button>
       <button id="audio-stop" type="button">Audio beenden</button>
       <p id="settings-error" class="error"></p>
     </form>
   </dialog>
-  <menu id="track-menu" class="context-menu"><button id="preview">Über PFL vorhören</button></menu>
-  <script src="site.js"></script>
+  <menu id="track-menu" class="context-menu">
+    <button id="play-deck-1">Auf Schacht 1 abspielen</button>
+    <button id="play-deck-2">Auf Schacht 2 abspielen</button>
+    <button id="preview">&#220;ber PFL vorh&#246;ren</button>
+  </menu>
+  <script src="site.js?v=4" defer></script>
 </body>
 </html>

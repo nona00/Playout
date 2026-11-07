@@ -1,0 +1,29 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <TargetFramework>net8.0</TargetFramework>
+    <GuiTargetFramework>net8.0-windows</GuiTargetFramework>
+    <OutputRoot>$(MSBuildThisFileDirectory)</OutputRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PlayoutProject Include="$(MSBuildThisFileDirectory)Playout.Engine\Playout.Engine.csproj" />
+    <PlayoutProject Include="$(MSBuildThisFileDirectory)Playout.Gui\Playout.Gui.csproj" />
+    <PlayoutProject Include="$(MSBuildThisFileDirectory)Playout.Web\Playout.Web.csproj" />
+  </ItemGroup>
+
+  <Target Name="Build">
+    <MSBuild Projects="@(PlayoutProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+  </Target>
+
+  <Target Name="Playout" DependsOnTargets="Build">
+    <Exec Command="start &quot;&quot; &quot;$(OutputRoot)Playout.Engine\bin\$(Configuration)\$(TargetFramework)\Playout.Engine.exe&quot;"
+          WorkingDirectory="$(OutputRoot)Playout.Engine\bin\$(Configuration)\$(TargetFramework)" />
+    <Exec Command="start &quot;&quot; &quot;$(OutputRoot)Playout.Gui\bin\$(Configuration)\$(GuiTargetFramework)\Playout.Gui.exe&quot;"
+          WorkingDirectory="$(OutputRoot)Playout.Gui\bin\$(Configuration)\$(GuiTargetFramework)" />
+    <Exec Command="start &quot;&quot; &quot;$(OutputRoot)Playout.Web\bin\$(Configuration)\$(TargetFramework)\Playout.Web.exe&quot;"
+          WorkingDirectory="$(OutputRoot)Playout.Web\bin\$(Configuration)\$(TargetFramework)" />
+  </Target>
+</Project>

@@ -31,6 +31,7 @@ internal sealed partial class MainForm
     private bool polling;
     private bool commandInProgress;
     private bool startingEngine;
+    private bool startingWeb;
 
     private Control CreateEngineToolbar()
     {
@@ -65,6 +66,7 @@ internal sealed partial class MainForm
         statusTimer.Tick += async (_, _) => await RefreshEngineStatusAsync();
         statusTimer.Start();
         await EnsureEngineRunningAsync();
+        await EnsureWebRunningAsync();
         Task statusRefresh = RefreshEngineStatusAsync();
         await RefreshMusicAsync();
         await statusRefresh;
@@ -178,9 +180,68 @@ internal sealed partial class MainForm
         Process? process = Process.Start(new ProcessStartInfo(executable)
         {
             UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Minimized,
             WorkingDirectory = Path.GetDirectoryName(executable)!
         });
         if (process is null) throw new InvalidOperationException("Der Engine-Prozess konnte nicht erstellt werden.");
+    }
+
+    private async Task EnsureWebRunningAsync()
+    {
+        if (await IsWebRunningAsync()) return;
+        if (startingWeb) return;
+        startingWeb = true;
+        try
+        {
+            StartWebProcess();
+            DateTime deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline && !lifetime.IsCancellationRequested)
+            {
+                await Task.Delay(250, lifetime.Token);
+                if (await IsWebRunningAsync()) return;
+            }
+            throw new InvalidOperationException("Die gestartete Weboberfläche antwortet nicht auf http://127.0.0.1:5188.");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            if (!IsDisposed) ShowError("Weboberfläche konnte nicht gestartet werden", exception);
+        }
+        finally { startingWeb = false; }
+    }
+
+    private static async Task<bool> IsWebRunningAsync()
+    {
+        using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(1) };
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync("http://127.0.0.1:5188/");
+            return response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) { return false; }
+    }
+
+    private static void StartWebProcess()
+    {
+        string[] candidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "Playout.Web.exe"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Playout.Web", "bin", "Debug", "net8.0", "Playout.Web.exe")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Playout.Web", "bin", "Release", "net8.0", "Playout.Web.exe"))
+        ];
+        string? executable = candidates.FirstOrDefault(File.Exists);
+        if (executable is null)
+            throw new InvalidOperationException("Playout.Web.exe wurde nicht gefunden. Bitte die Webanwendung erstellen oder neben der GUI bereitstellen.");
+        Process? process = Process.Start(new ProcessStartInfo(executable)
+        {
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Minimized,
+            WorkingDirectory = Path.GetDirectoryName(executable)!
+        });
+        if (process is null) throw new InvalidOperationException("Der Webprozess konnte nicht erstellt werden.");
     }
 
     private void RenderTracks()

@@ -1,7 +1,14 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging.Console;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+    options.SingleLine = true;
+});
 
 BassNativeLibraries.Register();
 

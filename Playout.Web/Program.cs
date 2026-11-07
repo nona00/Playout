@@ -1,7 +1,15 @@
 using System.Net;
 using Playout.Web;
+using Microsoft.Extensions.Logging.Console;
+using System.Net.Http.Headers;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+    options.SingleLine = true;
+});
 builder.WebHost.UseUrls("http://127.0.0.1:5188");
 builder.Services.AddHttpClient("Engine", client =>
 {
@@ -10,12 +18,15 @@ builder.Services.AddHttpClient("Engine", client =>
 });
 string sourcesPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "Playout", "Web", "music-sources.json");
+    "Playout", "Gui", "music-sources.json");
 builder.Services.AddSingleton(new WebMusicLibrary(sourcesPath));
 
 WebApplication app = builder.Build();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-store"
+});
 
 app.MapGet("/api/sources", (WebMusicLibrary library) => Results.Ok(library.GetSources()));
 app.MapPost("/api/sources", (SourceRequest request, WebMusicLibrary library) =>
@@ -34,7 +45,12 @@ app.MapMethods("/api/engine/{**path}", ["GET", "POST", "PUT"], async (
     HttpClient client = clientFactory.CreateClient("Engine");
     string query = context.Request.QueryString.Value ?? string.Empty;
     using HttpRequestMessage request = new(new HttpMethod(context.Request.Method), "api/" + path + query);
-    if (context.Request.ContentLength > 0) request.Content = new StreamContent(context.Request.Body);
+    if (context.Request.ContentLength > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
+    {
+        request.Content = new StreamContent(context.Request.Body);
+        if (MediaTypeHeaderValue.TryParse(context.Request.ContentType, out MediaTypeHeaderValue? contentType))
+            request.Content.Headers.ContentType = contentType;
+    }
     try
     {
         using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
