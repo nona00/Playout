@@ -8,6 +8,9 @@
     <Compile Update="MainForm.Library.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="PlayoutLogWindow.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="SettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>

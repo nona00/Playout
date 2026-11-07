@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
+using Playout;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-string logPath = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "Playout", "Logs", "Engine.log");
+string logPath = PlayoutLog.GetLogPath("Engine");
 using TrayFileLoggerProvider fileLogger = new(logPath);
 builder.Logging.ClearProviders();
 builder.Logging.AddProvider(fileLogger);

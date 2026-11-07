@@ -1,12 +1,11 @@
 using System.Net;
 using Playout.Web;
+using Playout;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-string logPath = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "Playout", "Logs", "Web.log");
+string logPath = PlayoutLog.GetLogPath("Web");
 using TrayFileLoggerProvider fileLogger = new(logPath);
 builder.Logging.ClearProviders();
 builder.Logging.AddProvider(fileLogger);

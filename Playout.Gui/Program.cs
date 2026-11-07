@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Windows.Forms;
+using Playout;
 
 namespace Playout.Gui;
 
@@ -10,15 +11,16 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         Application.ThreadException += (_, args) =>
-            PlayoutGuiLog.Write("Critical", "UI", "Nicht behandelte Ausnahme im UI-Thread.", args.Exception);
+            PlayoutLog.Write(PlayoutLog.GetLogPath("Playout"), "Critical", "UI", "Nicht behandelte Ausnahme im UI-Thread.", args.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            PlayoutGuiLog.Write("Critical", "Application", "Nicht behandelte Ausnahme.", args.ExceptionObject as Exception);
+            PlayoutLog.Write(PlayoutLog.GetLogPath("Playout"), "Critical", "Application", "Nicht behandelte Ausnahme.", args.ExceptionObject as Exception);
         Application.Run(new MainForm());
     }
 }
 
 internal sealed partial class MainForm : Form
 {
+    private static readonly string LogPath = PlayoutLog.GetLogPath("Playout");
     private static readonly Color BackgroundColor = Color.FromArgb(17, 20, 28);
     private static readonly Color PanelColor = Color.FromArgb(29, 34, 45);
     private static readonly Color TextColor = Color.FromArgb(235, 238, 245);
@@ -113,7 +115,7 @@ internal sealed partial class MainForm : Form
     private void ShowLog()
     {
         if (logWindow is null || logWindow.IsDisposed)
-            logWindow = new PlayoutLogWindow(PlayoutGuiLog.LogPath, windowIcon);
+            logWindow = new PlayoutLogWindow(LogPath, windowIcon);
 
         if (!logWindow.Visible)
             logWindow.Show();

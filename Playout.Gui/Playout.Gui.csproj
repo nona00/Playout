@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\Common\TrayIcon.cs" Link="TrayIcon.cs" />
+    <Compile Include="..\Common\PlayoutLog.cs" Link="PlayoutLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Playout.Engine\**" />

@@ -4,11 +4,11 @@ using System.Drawing;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
+using Playout;
 
 internal sealed class TrayFileLoggerProvider : ILoggerProvider
 {
     private readonly string _path;
-    private readonly object _sync = new();
 
     public TrayFileLoggerProvider(string path)
     {
@@ -16,14 +16,14 @@ internal sealed class TrayFileLoggerProvider : ILoggerProvider
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
     }
 
-    public ILogger CreateLogger(string categoryName) => new TrayFileLogger(_path, categoryName, _sync);
+    public ILogger CreateLogger(string categoryName) => new TrayFileLogger(_path, categoryName);
 
     public void Dispose()
     {
     }
 }
 
-internal sealed class TrayFileLogger(string path, string category, object sync) : ILogger
+internal sealed class TrayFileLogger(string path, string category) : ILogger
 {
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -39,12 +39,7 @@ internal sealed class TrayFileLogger(string path, string category, object sync) 
         if (exception is not null)
             message += Environment.NewLine + exception;
 
-        lock (sync)
-        {
-            using FileStream stream = new(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using StreamWriter writer = new(stream);
-            writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{logLevel}] {category}: {message}");
-        }
+        PlayoutLog.Write(path, logLevel.ToString(), category, message, exception);
     }
 }
 

@@ -5,37 +5,6 @@ using System.Windows.Forms;
 
 namespace Playout.Gui;
 
-internal static class PlayoutGuiLog
-{
-    private static readonly object Sync = new();
-
-    public static string LogPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Playout", "Logs", "Playout.log");
-
-    public static void Write(string level, string category, string message, Exception? exception = null)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            lock (Sync)
-            {
-                using FileStream stream = new(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                using StreamWriter writer = new(stream);
-                writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {category}: {message}");
-                if (exception is not null)
-                    writer.WriteLine(exception);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-    }
-}
-
 internal sealed class PlayoutLogWindow : Form
 {
     private const int MaxLogBytes = 128 * 1024;

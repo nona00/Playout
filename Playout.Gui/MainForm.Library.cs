@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Forms;
+using Playout;
 
 namespace Playout.Gui;
 
@@ -58,7 +59,7 @@ internal sealed partial class MainForm
 
     private async void MainFormShown(object? sender, EventArgs e)
     {
-        PlayoutGuiLog.Write("Information", nameof(MainForm), "Playout gestartet.");
+        PlayoutLog.Write(LogPath, "Information", nameof(MainForm), "Playout gestartet.");
         guiStartedAt = DateTimeOffset.UtcNow;
         startupGraceTimer.Tick += (_, _) =>
         {
@@ -87,7 +88,7 @@ internal sealed partial class MainForm
 
     private void MainFormClosed(object? sender, FormClosedEventArgs e)
     {
-        PlayoutGuiLog.Write("Information", nameof(MainForm), "Playout wird beendet.");
+        PlayoutLog.Write(LogPath, "Information", nameof(MainForm), "Playout wird beendet.");
         logWindow?.Close();
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
@@ -170,7 +171,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            PlayoutGuiLog.Write("Error", nameof(MainForm), "Engine konnte nicht gestartet werden.", exception);
+            PlayoutLog.Write(LogPath, "Error", nameof(MainForm), "Engine konnte nicht gestartet werden.", exception);
             if (!IsDisposed) SetStatusError($"Engine konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingEngine = false; }
@@ -229,7 +230,7 @@ internal sealed partial class MainForm
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            PlayoutGuiLog.Write("Error", nameof(MainForm), "Weboberfläche konnte nicht gestartet werden.", exception);
+            PlayoutLog.Write(LogPath, "Error", nameof(MainForm), "Weboberfläche konnte nicht gestartet werden.", exception);
             if (!IsDisposed) SetStatusError($"Weboberfläche konnte nicht gestartet werden: {exception.Message}", delayed: true);
         }
         finally { startingWeb = false; }
@@ -305,7 +306,7 @@ internal sealed partial class MainForm
                 $"{deckId} spielt gerade. Beim Laden wird der laufende Titel ersetzt. Fortfahren?",
                 "Titel ersetzen", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             await engine.LoadAsync(deckId, track.Path);
-            PlayoutGuiLog.Write("Information", "Engine", $"Titel geladen: {track.Title} in {deckId}.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", $"Titel geladen: {track.Title} in {deckId}.");
         }, null);
     }
 
@@ -317,7 +318,7 @@ internal sealed partial class MainForm
         {
             await engine.LoadAsync("PFL", selectedTrack.Path);
             await engine.PlayAsync("PFL");
-            PlayoutGuiLog.Write("Information", "Engine", $"PFL-Vorhören gestartet: {selectedTrack.Title}.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", $"PFL-Vorhören gestartet: {selectedTrack.Title}.");
         }, null);
     }
 
@@ -334,7 +335,7 @@ internal sealed partial class MainForm
             if (free is null) throw new InvalidOperationException("Kein freier Ausspielschacht verfügbar.");
             await engine.LoadAsync(free.DeckId, selectedTrack.Path);
             await engine.PlayAsync(free.DeckId);
-            PlayoutGuiLog.Write("Information", "Engine", $"Titel abgespielt: {selectedTrack.Title} auf {free.DeckId}.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", $"Titel abgespielt: {selectedTrack.Title} auf {free.DeckId}.");
         }, null);
     }
 
@@ -359,7 +360,7 @@ internal sealed partial class MainForm
             }
 
             string title = path is null ? "kein Titel geladen" : Path.GetFileName(path);
-            PlayoutGuiLog.Write("Information", "Engine", $"{actionDescription}: {title} ({deckId}).");
+            PlayoutLog.Write(LogPath, "Information", "Engine", $"{actionDescription}: {title} ({deckId}).");
         }, null);
     }
 
@@ -394,7 +395,7 @@ internal sealed partial class MainForm
             if (MessageBox.Show(this, "Die zugeordneten Programmausgänge beider Decks werden auf das gewählte Kanalpaar gelegt. Andere Ausgänge bleiben unverändert. Überlappende Kanäle werden gemischt; auch PFL kann dadurch hörbar sein. Fortfahren?",
                 "Routing ändern", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             await engine.AssignDeckOutputsAsync(dialog.Mapping);
-            PlayoutGuiLog.Write("Information", "Engine", "Programmausgänge konfiguriert.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", "Programmausgänge konfiguriert.");
         });
     }
 
@@ -410,7 +411,7 @@ internal sealed partial class MainForm
                 "PFL wird auf dieses Kanalpaar gelegt. Es sollte sich vom Programmkanal unterscheiden; gleiche Kanäle mischen Programm und PFL.");
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Mapping is null) return;
             await engine.AssignPflOutputAsync(dialog.Mapping);
-            PlayoutGuiLog.Write("Information", "Engine", "PFL-Ausgang konfiguriert.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", "PFL-Ausgang konfiguriert.");
         });
     }
 
@@ -424,7 +425,7 @@ internal sealed partial class MainForm
                 routing.Outputs.Any(output => output.Id.Equals(deck.OutputId, StringComparison.OrdinalIgnoreCase) && output.Device is not null));
             if (!connected) throw new InvalidOperationException("Kein Deckausgang ist verbunden. Bitte zuerst 'Audio einrichten' wählen.");
             await engine.InitializeAsync();
-            PlayoutGuiLog.Write("Information", "Engine", "Audioausgabe initialisiert.");
+            PlayoutLog.Write(LogPath, "Information", "Engine", "Audioausgabe initialisiert.");
         });
     }
 
@@ -443,7 +444,7 @@ internal sealed partial class MainForm
         {
             await action();
             if (actionDescription is not null)
-                PlayoutGuiLog.Write("Information", "Engine", actionDescription);
+                PlayoutLog.Write(LogPath, "Information", "Engine", actionDescription);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)
         {
@@ -498,7 +499,7 @@ internal sealed partial class MainForm
 
     private void ShowError(string title, Exception exception)
     {
-        PlayoutGuiLog.Write("Error", nameof(MainForm), title, exception);
+        PlayoutLog.Write(LogPath, "Error", nameof(MainForm), title, exception);
         SetStatusError($"{title}: {exception.Message}");
     }
 

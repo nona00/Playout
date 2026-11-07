@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="..\Common\TraySupport.cs" Link="TraySupport.cs" />
     <Compile Include="..\Common\TrayIcon.cs" Link="TrayIcon.cs" />
+    <Compile Include="..\Common\PlayoutLog.cs" Link="PlayoutLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Update="runtimes\win-x86\native\*.dll;runtimes\win-x64\native\*.dll;third-party\bass\*.txt"
