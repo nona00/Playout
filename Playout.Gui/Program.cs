@@ -143,7 +143,7 @@ internal sealed partial class MainForm : Form
         playlistTrackList.OwnerDraw = true;
         playlistTrackList.DrawColumnHeader += DrawListColumnHeader;
         playlistTrackList.DrawItem += (_, eventArgs) => eventArgs.DrawDefault = true;
-        playlistTrackList.DrawSubItem += (_, eventArgs) => eventArgs.DrawDefault = true;
+        playlistTrackList.DrawSubItem += DrawPlaylistTrackSubItem;
         playlistTrackList.Columns.Add("Titel", 240);
         playlistTrackList.Columns.Add("Dateipfad", 420);
         ContextMenuStrip playlistTrackMenu = new();
@@ -164,7 +164,7 @@ internal sealed partial class MainForm : Form
             ListViewItem? item = playlistTrackList.GetItemAt(eventArgs.X, eventArgs.Y);
             if (item is not null) item.Selected = true;
         };
-        panel.Controls.Add(playlistTrackList);
+        panel.Controls.Add(CreateScrollableList(playlistTrackList));
         FlowLayoutPanel heading = new()
         {
             Dock = DockStyle.Top,
@@ -255,11 +255,65 @@ internal sealed partial class MainForm : Form
         eventArgs.Graphics.FillRectangle(background, eventArgs.Bounds);
         TextRenderer.DrawText(
             eventArgs.Graphics,
-            eventArgs.Header.Text,
+            eventArgs.Header?.Text ?? string.Empty,
             eventArgs.Font,
             eventArgs.Bounds,
             Color.White,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping);
+    }
+
+    private static void DrawPlaylistTrackSubItem(object? sender, DrawListViewSubItemEventArgs eventArgs)
+    {
+        ListViewItem? item = eventArgs.Item;
+        ListViewItem.ListViewSubItem? subItem = eventArgs.SubItem;
+        if (eventArgs.ColumnIndex != 0 || item is null || subItem is null || subItem.Tag is not true)
+        {
+            eventArgs.DrawDefault = true;
+            return;
+        }
+
+        eventArgs.DrawBackground();
+        const string missingMarker = "\u2716";
+        Rectangle titleBounds = eventArgs.Bounds;
+        Font font = item.Font;
+        int markerWidth = TextRenderer.MeasureText(eventArgs.Graphics, missingMarker, font, Size.Empty, TextFormatFlags.NoPadding).Width + 6;
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            missingMarker,
+            font,
+            titleBounds,
+            Color.IndianRed,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.PreserveGraphicsClipping);
+
+        titleBounds.X += markerWidth;
+        titleBounds.Width = Math.Max(0, titleBounds.Width - markerWidth);
+        Color titleColor = item.Selected ? SystemColors.HighlightText : subItem.ForeColor;
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            subItem.Text,
+            font,
+            titleBounds,
+            titleColor,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping);
+    }
+
+    private static Control CreateScrollableList(ListView list)
+    {
+        TableLayoutPanel container = new()
+        {
+            Dock = DockStyle.Fill,
+            BackColor = PanelColor,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty
+        };
+        container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        container.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 20));
+        container.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        list.Dock = DockStyle.Fill;
+        container.Controls.Add(list, 0, 0);
+        container.Controls.Add(new DarkListScrollBar(list) { Dock = DockStyle.Fill }, 1, 0);
+        return container;
     }
 
     private TabPage CreateSearchPage()
@@ -304,7 +358,7 @@ internal sealed partial class MainForm : Form
             if (item is not null) item.Selected = true;
         };
         musicList.DoubleClick += async (_, _) => await LoadAndPlayInFreeDeckAsync();
-        layout.Controls.Add(musicList, 0, 2);
+        layout.Controls.Add(CreateScrollableList(musicList), 0, 2);
 
         FlowLayoutPanel loadButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
         loadButtons.Controls.Add(CreateActionButton("In Schacht 1 laden", async () => await LoadSelectedAsync("Deck 1")));
@@ -322,14 +376,19 @@ internal sealed partial class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         playlistFilesList.Dock = DockStyle.Fill;
-        playlistFilesList.View = View.List;
+        playlistFilesList.View = View.Details;
         playlistFilesList.FullRowSelect = true;
         playlistFilesList.MultiSelect = false;
         playlistFilesList.BackColor = PanelColor;
         playlistFilesList.ForeColor = TextColor;
         playlistFilesList.BorderStyle = BorderStyle.None;
+        playlistFilesList.OwnerDraw = true;
+        playlistFilesList.DrawColumnHeader += DrawListColumnHeader;
+        playlistFilesList.DrawItem += (_, eventArgs) => eventArgs.DrawDefault = true;
+        playlistFilesList.DrawSubItem += (_, eventArgs) => eventArgs.DrawDefault = true;
+        playlistFilesList.Columns.Add("Spielliste", 600);
         playlistFilesList.DoubleClick += async (_, _) => await LoadPlaylistIntoMainAsync();
-        layout.Controls.Add(playlistFilesList, 0, 0);
+        layout.Controls.Add(CreateScrollableList(playlistFilesList), 0, 0);
         layout.Controls.Add(playlistsStatus, 0, 1);
         page.Controls.Add(layout);
         return page;

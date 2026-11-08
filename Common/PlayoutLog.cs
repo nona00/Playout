@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace Playout;
 
 internal static class PlayoutLog

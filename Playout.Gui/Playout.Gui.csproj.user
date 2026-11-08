@@ -8,6 +8,9 @@
     <Compile Update="AudioSetupForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="DarkListScrollBar.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Update="MainForm.Library.cs">
       <SubType>Form</SubType>
     </Compile>

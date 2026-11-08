@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Forms;
 using Playout;
+using System.IO;
 
 namespace Playout.Gui;
 
@@ -24,9 +25,9 @@ internal sealed partial class MainForm
     private readonly List<MusicTrack> playlistTracks = [];
     private readonly List<PlaylistFile> playlistFiles = [];
     private readonly TextBox musicSearch = new();
-    private readonly ListView musicList = new();
-    private readonly ListView playlistFilesList = new();
-    private readonly ListView playlistTrackList = new();
+    private readonly DarkScrollableListView musicList = new();
+    private readonly DarkScrollableListView playlistFilesList = new();
+    private readonly DarkScrollableListView playlistTrackList = new();
     private readonly Label libraryStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
     private readonly Label playlistsStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
     private readonly Label loadedPlaylistName = new() { ForeColor = MutedColor, Text = "Keine Spielliste geladen" };
@@ -281,7 +282,9 @@ internal sealed partial class MainForm
             playlistTrackList.Items.Clear();
             foreach (MusicTrack track in playlistTracks)
             {
+                bool missing = !File.Exists(track.Path);
                 ListViewItem item = new(track.Title) { Tag = track };
+                item.SubItems[0].Tag = missing;
                 item.SubItems.Add(track.Path);
                 playlistTrackList.Items.Add(item);
             }

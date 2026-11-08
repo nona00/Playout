@@ -40,7 +40,9 @@ internal sealed class TrayFileLogger(string path, string category) : ILogger
         if (exception is not null)
             message += Environment.NewLine + exception;
 
-        if (logLevel == LogLevel.Information && category.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal))
+        if (logLevel == LogLevel.Information &&
+            (category.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) ||
+             category.StartsWith("System.Net.Http", StringComparison.Ordinal)))
             logLevel = LogLevel.Debug;
 
         PlayoutLog.Write(path, logLevel.ToString(), category, message, exception);
