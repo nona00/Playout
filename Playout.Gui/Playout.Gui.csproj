@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\Common\PlaylistLibrary.cs" Link="PlaylistLibrary.cs" />
     <Compile Include="..\Common\TrayIcon.cs" Link="TrayIcon.cs" />
     <Compile Include="..\Common\PlayoutLog.cs" Link="PlayoutLog.cs" />
   </ItemGroup>

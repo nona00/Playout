@@ -19,6 +19,10 @@ string sourcesPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "Playout", "Gui", "music-sources.json");
 builder.Services.AddSingleton(new WebMusicLibrary(sourcesPath));
+string playlistSettingsPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "Playout", "Gui", "music-playlist-folder.json");
+builder.Services.AddSingleton(new PlaylistLibrary(playlistSettingsPath));
 
 WebApplication app = builder.Build();
 using TrayHost tray = new("W", "Playout Web", logPath, app.Lifetime.StopApplication, "http://127.0.0.1:5188");
@@ -43,6 +47,18 @@ app.MapDelete("/api/sources", (string path, WebMusicLibrary library) =>
     }, () => Results.NoContent()));
 app.MapGet("/api/tracks", (WebMusicLibrary library, CancellationToken cancellationToken) =>
     Results.Ok(library.Scan(cancellationToken)));
+app.MapGet("/api/playlists/folder", (PlaylistLibrary library) =>
+    Run(() => { }, () => Results.Ok(new { path = library.LoadFolder() })));
+app.MapPut("/api/playlists/folder", (PlaylistFolderRequest request, PlaylistLibrary library) =>
+    Run(() => library.SaveFolder(request.Path), () => Results.Ok(new { path = library.LoadFolder() })));
+app.MapGet("/api/playlists", (PlaylistLibrary library) =>
+    Run(() => { }, () => Results.Ok(library.GetPlaylists())));
+app.MapGet("/api/playlists/content", (string name, PlaylistLibrary library) =>
+    Run(() => { }, () => Results.Ok(library.LoadPlaylist(name))));
+app.MapGet("/api/playlists/current", (PlaylistLibrary library) =>
+    Run(() => { }, () => Results.Ok(new { name = library.LoadCurrentPlaylist() })));
+app.MapPut("/api/playlists/current", (PlaylistSelectionRequest request, PlaylistLibrary library) =>
+    Run(() => library.SaveCurrentPlaylist(request.Name), () => Results.Ok(new { name = library.LoadCurrentPlaylist() })));
 
 app.MapMethods("/api/engine/{**path}", ["GET", "POST", "PUT"], async (
     string path,
@@ -195,3 +211,5 @@ static async Task<string?> ReadDeckTrackTitleAsync(HttpClient client, string dec
 
 internal sealed record SourceRequest(string? Path);
 internal sealed record LoadAudioRequest(string? Path);
+internal sealed record PlaylistFolderRequest(string? Path);
+internal sealed record PlaylistSelectionRequest(string? Name);

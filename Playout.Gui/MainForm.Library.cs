@@ -12,6 +12,8 @@ internal sealed partial class MainForm
 {
     private readonly MusicLibrary library = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Playout", "Gui", "music-sources.json"));
+    private readonly PlaylistLibrary playlistLibrary = new(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Playout", "Gui", "music-playlist-folder.json"));
     private readonly EngineClient engine = new(new HttpClient
     {
         BaseAddress = new Uri("http://127.0.0.1:5187/"),
@@ -19,9 +21,15 @@ internal sealed partial class MainForm
     });
     private readonly List<string> sources = [];
     private readonly List<MusicTrack> tracks = [];
+    private readonly List<MusicTrack> playlistTracks = [];
+    private readonly List<PlaylistFile> playlistFiles = [];
     private readonly TextBox musicSearch = new();
     private readonly ListView musicList = new();
+    private readonly ListView playlistFilesList = new();
+    private readonly ListView playlistTrackList = new();
     private readonly Label libraryStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
+    private readonly Label playlistsStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
+    private readonly Label loadedPlaylistName = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(8, 5, 0, 0), Text = "Keine Spielliste geladen" };
     private readonly Label engineStatus = new() { AutoSize = true, ForeColor = TextColor, Padding = new Padding(6, 8, 0, 0), Text = "Engine: Verbindung wird geprüft …" };
     private readonly Label deck1Status = new();
     private readonly Label deck2Status = new();
@@ -36,6 +44,7 @@ internal sealed partial class MainForm
     private bool commandInProgress;
     private bool startingEngine;
     private bool startingWeb;
+    private string loadedPlaylistFileName = string.Empty;
 
     private Control CreateEngineToolbar()
     {
@@ -67,7 +76,11 @@ internal sealed partial class MainForm
             if (statusHasError) engineStatus.ForeColor = Color.IndianRed;
         };
         startupGraceTimer.Start();
-        statusTimer.Tick += async (_, _) => await RefreshEngineStatusAsync();
+        statusTimer.Tick += async (_, _) =>
+        {
+            await RefreshEngineStatusAsync();
+            await SyncLoadedPlaylistAsync();
+        };
         statusTimer.Start();
         Task engineStartup = EnsureEngineRunningAsync();
         Task webStartup = EnsureWebRunningAsync();
@@ -83,6 +96,8 @@ internal sealed partial class MainForm
         await Task.WhenAll(engineStartup, webStartup);
         Task statusRefresh = RefreshEngineStatusAsync();
         await RefreshMusicAsync();
+        await RefreshPlaylistsAsync();
+        await SyncLoadedPlaylistAsync();
         await statusRefresh;
     }
 
@@ -110,6 +125,8 @@ internal sealed partial class MainForm
         using SettingsForm dialog = new(
             sources,
             updated => library.SaveSources(updated),
+            playlistLibrary.LoadFolder(),
+            playlistLibrary.SaveFolder,
             ConfigureAudioAsync,
             ConfigurePflAsync,
             InitializeAudioAsync,
@@ -118,6 +135,124 @@ internal sealed partial class MainForm
         sources.Clear();
         sources.AddRange(dialog.Sources);
         await RefreshMusicAsync();
+        await RefreshPlaylistsAsync();
+        await SyncLoadedPlaylistAsync();
+    }
+
+    private async Task RefreshPlaylistsAsync()
+    {
+        if (IsDisposed)
+            return;
+
+        playlistsStatus.Text = "Lese Spiellisten …";
+        try
+        {
+            IReadOnlyList<PlaylistFile> result = await Task.Run(playlistLibrary.GetPlaylists, lifetime.Token);
+            if (IsDisposed)
+                return;
+            playlistFiles.Clear();
+            playlistFiles.AddRange(result);
+            RenderPlaylistFiles();
+            string folder = playlistLibrary.LoadFolder();
+            playlistsStatus.Text = string.IsNullOrEmpty(folder)
+                ? "Kein Spiellistenordner eingerichtet"
+                : $"{playlistFiles.Count} Spiellisten · {folder}";
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            if (!IsDisposed)
+                ShowError("Spiellisten konnten nicht geladen werden", exception);
+        }
+    }
+
+    private void RenderPlaylistFiles()
+    {
+        playlistFilesList.BeginUpdate();
+        try
+        {
+            playlistFilesList.Items.Clear();
+            foreach (PlaylistFile playlist in playlistFiles)
+                playlistFilesList.Items.Add(new ListViewItem(playlist.Name) { Tag = playlist });
+        }
+        finally { playlistFilesList.EndUpdate(); }
+    }
+
+    private async Task LoadPlaylistIntoMainAsync()
+    {
+        if (playlistFilesList.SelectedItems.Count != 1 || playlistFilesList.SelectedItems[0].Tag is not PlaylistFile playlist)
+            return;
+
+        await LoadPlaylistByNameAsync(playlist.Name, saveAsCurrent: true);
+    }
+
+    private async Task LoadPlaylistByNameAsync(string name, bool saveAsCurrent)
+    {
+        try
+        {
+            IReadOnlyList<PlaylistTrack> loaded = await Task.Run(() => playlistLibrary.LoadPlaylist(name), lifetime.Token);
+            if (IsDisposed)
+                return;
+            if (saveAsCurrent)
+                playlistLibrary.SaveCurrentPlaylist(name);
+            playlistTracks.Clear();
+            playlistTracks.AddRange(loaded.Select(track => new MusicTrack(track.Path, name)));
+            loadedPlaylistFileName = name;
+            loadedPlaylistName.Text = name;
+            RenderLoadedPlaylist();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException)
+        {
+            ShowError("Spielliste konnte nicht geladen werden", exception);
+        }
+    }
+
+    private async Task SyncLoadedPlaylistAsync()
+    {
+        if (IsDisposed)
+            return;
+
+        try
+        {
+            string current = await Task.Run(playlistLibrary.LoadCurrentPlaylist, lifetime.Token);
+            if (string.Equals(current, loadedPlaylistFileName, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (string.IsNullOrEmpty(current))
+            {
+                loadedPlaylistFileName = string.Empty;
+                playlistTracks.Clear();
+                loadedPlaylistName.Text = "Keine Spielliste geladen";
+                RenderLoadedPlaylist();
+                return;
+            }
+
+            await LoadPlaylistByNameAsync(current, saveAsCurrent: false);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            if (!IsDisposed)
+                ShowError("Aktuelle Spielliste konnte nicht synchronisiert werden", exception);
+        }
+    }
+
+    private void RenderLoadedPlaylist()
+    {
+        playlistTrackList.BeginUpdate();
+        try
+        {
+            playlistTrackList.Items.Clear();
+            foreach (MusicTrack track in playlistTracks)
+            {
+                ListViewItem item = new(track.Title) { Tag = track };
+                item.SubItems.Add(track.Path);
+                playlistTrackList.Items.Add(item);
+            }
+            playlistsStatus.Text = $"{playlistTracks.Count} Titel geladen";
+        }
+        finally { playlistTrackList.EndUpdate(); }
     }
 
     private async Task RefreshMusicAsync()
@@ -313,7 +448,12 @@ internal sealed partial class MainForm
     private async Task PreviewSelectedAsync()
     {
         if (!TryGetSelectedTrack(out MusicTrack? track)) return;
-        MusicTrack selectedTrack = track!;
+        await PreviewTrackAsync(track!);
+    }
+
+    private async Task PreviewTrackAsync(MusicTrack selectedTrack)
+    {
+        if (!EnsureTrackExists(selectedTrack)) return;
         await RunEngineActionAsync(async () =>
         {
             await engine.LoadAsync("PFL", selectedTrack.Path);
@@ -325,7 +465,12 @@ internal sealed partial class MainForm
     private async Task LoadAndPlayInFreeDeckAsync()
     {
         if (!TryGetSelectedTrack(out MusicTrack? track)) return;
-        MusicTrack selectedTrack = track!;
+        await LoadAndPlayInFreeDeckAsync(track!);
+    }
+
+    private async Task LoadAndPlayInFreeDeckAsync(MusicTrack selectedTrack)
+    {
+        if (!EnsureTrackExists(selectedTrack)) return;
         await RunEngineActionAsync(async () =>
         {
             EngineAudioStatus status = await engine.GetStatusAsync();
@@ -372,13 +517,21 @@ internal sealed partial class MainForm
             MessageBox.Show(this, "Bitte zuerst eine Audiodatei auswählen.", "Musik", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
         }
-        if (!File.Exists(track.Path))
+        if (!EnsureTrackExists(track))
         {
-            MessageBox.Show(this, "Die Datei ist nicht mehr verfügbar. Bitte die Quelle erneut einlesen.", "Musik", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             track = null;
             return false;
         }
         return true;
+    }
+
+    private bool EnsureTrackExists(MusicTrack track)
+    {
+        if (File.Exists(track.Path))
+            return true;
+
+        MessageBox.Show(this, "Die Datei ist nicht mehr verfügbar. Bitte die Spielliste oder Quelle erneut einlesen.", "Musik", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return false;
     }
 
     private async Task ConfigureAudioAsync()

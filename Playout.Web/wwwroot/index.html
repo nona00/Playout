@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Playout</title>
-  <link rel="stylesheet" href="site.css?v=7">
+  <link rel="stylesheet" href="site.css?v=8">
 </head>
 <body>
   <header>
@@ -13,13 +13,27 @@
     <button id="settings-button" class="icon-button" title="Einstellungen" aria-label="Einstellungen">&#9881;</button>
   </header>
   <main>
-    <section class="panel playlist"><h2>SPIELLISTE</h2><p class="placeholder">Spiellistenplanung folgt.</p></section>
+      <section class="panel playlist">
+        <h2>SPIELLISTE</h2>
+        <span id="loaded-playlist-name" class="muted">Keine Spielliste geladen</span>
+        <div id="loaded-playlist" class="track-list" aria-label="Geladene Spielliste"></div>
+      </section>
     <section class="panel browser">
       <h2>MUSIKQUELLEN / RECHERCHE</h2>
-      <input id="search" type="search" placeholder="Dateiname oder Pfad suchen">
-      <div class="pfl"><strong>PFL</strong><span id="pfl-status">Nicht initialisiert</span><button id="pfl-stop">Stopp</button></div>
-      <div id="tracks" class="track-list" aria-label="Musiksuche"></div>
-      <span id="library-status"></span>
+        <div class="browser-tabs">
+          <button id="search-tab" class="active" type="button">Recherche</button>
+          <button id="playlists-tab" type="button">Spiellisten</button>
+        </div>
+        <section id="search-view" class="browser-view">
+          <input id="search" type="search" placeholder="Dateiname oder Pfad suchen">
+          <div class="pfl"><strong>PFL</strong><span id="pfl-status">Nicht initialisiert</span><button id="pfl-stop">Stopp</button></div>
+          <div id="tracks" class="track-list" aria-label="Musiksuche"></div>
+          <span id="library-status" class="muted"></span>
+        </section>
+        <section id="playlists-view" class="browser-view" hidden>
+          <div id="playlists" class="track-list" aria-label="Spiellisten"></div>
+          <span id="playlists-status" class="muted"></span>
+        </section>
     </section>
     <div class="outputs">
       <section class="panel deck"><h2>AUSSPIELSCHACHT 1</h2><div id="deck-1-status" class="deck-status">Nicht initialisiert</div><div><button data-deck="Deck 1" data-action="play">Start</button><button data-deck="Deck 1" data-action="pause">Pause</button><button data-deck="Deck 1" data-action="stop">Stopp</button></div></section>
@@ -35,6 +49,9 @@
       <div class="source-add"><input id="source-path" placeholder="C:\Musik"><button id="add-source" type="button">Hinzuf&#252;gen</button></div>
       <ul id="sources"></ul>
       <button id="scan" type="button">Musikquellen neu einlesen</button>
+      <h3>Spiellisten</h3>
+      <p>Ordner mit M3U-, M3U8- oder PLS-Dateien auf dem Computer des Webservers.</p>
+      <div class="source-add"><input id="playlist-folder" placeholder="C:\Spiellisten"><button id="save-playlist-folder" type="button">Speichern</button></div>
       <h3>Audio</h3>
       <p>Die Kanalzuordnung wird in der WinForms-Oberfl&#228;che eingerichtet. Die hier verf&#252;gbaren Befehle steuern den bestehenden Routingzustand.</p>
       <button id="audio-start" type="button">Audio starten</button>
@@ -43,10 +60,11 @@
     </form>
   </dialog>
   <menu id="track-menu" class="context-menu">
+    <button id="next-track">Next (freier Ausspielschacht)</button>
     <button id="play-deck-1">Auf Schacht 1 abspielen</button>
     <button id="play-deck-2">Auf Schacht 2 abspielen</button>
     <button id="preview">&#220;ber PFL vorh&#246;ren</button>
   </menu>
-  <script src="site.js?v=7" defer></script>
+  <script src="site.js?v=10" defer></script>
 </body>
 </html>

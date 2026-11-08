@@ -1,5 +1,6 @@
 const engine = '/api/engine/';
-let tracks = [], selected = null;
+let tracks = [], playlists = [], loadedPlaylist = [], selected = null;
+let loadedPlaylistName = '', syncingPlaylist = false;
 const $ = selector => document.querySelector(selector);
 const startupTime = Date.now();
 let engineUnavailable = false;
@@ -40,10 +41,68 @@ function renderTracks() {
     item.innerHTML = `<strong></strong><small></small>`; item.querySelector('strong').textContent = track.title; item.querySelector('small').textContent = track.path;
     item.onclick = () => { selected = track; renderTracks(); };
     item.ondblclick = () => loadFreeDeck(track);
-    item.oncontextmenu = event => { event.preventDefault(); selected = track; renderTracks(); $('#track-menu').style.left = `${event.clientX}px`; $('#track-menu').style.top = `${event.clientY}px`; $('#track-menu').classList.add('show'); };
+    item.oncontextmenu = event => showTrackMenu(event, track);
     list.append(item);
   });
   $('#library-status').textContent = `${list.childElementCount} / ${tracks.length} Titel`;
+}
+function renderPlaylists() {
+  const list = $('#playlists'); list.replaceChildren();
+  playlists.forEach(playlist => {
+    const item = document.createElement('div'); item.className = 'track';
+    item.textContent = playlist.name;
+    item.ondblclick = () => loadPlaylist(playlist.name);
+    list.append(item);
+  });
+}
+function renderLoadedPlaylist() {
+  const list = $('#loaded-playlist'); list.replaceChildren();
+  loadedPlaylist.forEach(track => {
+    const item = document.createElement('div'); item.className = 'track';
+    item.innerHTML = '<strong></strong><small></small>';
+    item.querySelector('strong').textContent = track.title;
+    item.querySelector('small').textContent = track.path;
+    item.oncontextmenu = event => showTrackMenu(event, track);
+    list.append(item);
+  });
+  $('#loaded-playlist-name').textContent = loadedPlaylist.length ? `${loadedPlaylistName} · ${loadedPlaylist.length} Titel` : loadedPlaylistName || 'Keine Spielliste geladen';
+}
+async function loadPlaylist(name) {
+  await run(async () => {
+    const content = await request(`/api/playlists/content?name=${encodeURIComponent(name)}`);
+    await request('/api/playlists/current', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+    });
+    loadedPlaylist = content;
+    loadedPlaylistName = name;
+    renderLoadedPlaylist();
+  });
+}
+async function syncLoadedPlaylist() {
+  if (syncingPlaylist) return;
+  syncingPlaylist = true;
+  try {
+    const current = await request('/api/playlists/current');
+    if (current.name === loadedPlaylistName) return;
+    if (!current.name) {
+      loadedPlaylist = [];
+      loadedPlaylistName = '';
+    } else {
+      loadedPlaylist = await request(`/api/playlists/content?name=${encodeURIComponent(current.name)}`);
+      loadedPlaylistName = current.name;
+    }
+    renderLoadedPlaylist();
+  } catch (error) { showError(error.message); }
+  finally { syncingPlaylist = false; }
+}
+async function refreshPlaylists() {
+  try {
+    const [folder, result] = await Promise.all([request('/api/playlists/folder'), request('/api/playlists')]);
+    playlists = result;
+    await syncLoadedPlaylist();
+    renderPlaylists();
+    $('#playlists-status').textContent = folder.path ? `${playlists.length} Spiellisten · ${folder.path}` : 'Kein Spiellistenordner eingerichtet';
+  } catch (error) { showError(error.message); }
 }
 async function refreshTracks() {
   try {
@@ -94,16 +153,40 @@ async function refreshSources() { const sources = await request('/api/sources');
 $('#settings-button').onclick = async () => {
   $('#settings-error').textContent = '';
   $('#settings-dialog').showModal();
-  try { await refreshSources(); } catch (error) { showError(error.message); }
+  try {
+    await refreshSources();
+    const folder = await request('/api/playlists/folder');
+    $('#playlist-folder').value = folder.path;
+  } catch (error) { showError(error.message); }
 };
 $('#add-source').onclick = async () => { const path = $('#source-path').value.trim(); if (!path) return; await run(async () => { await request('/api/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }); $('#source-path').value = ''; await refreshSources(); await refreshTracks(); }); };
 $('#scan').onclick = refreshTracks;
+$('#save-playlist-folder').onclick = async () => {
+  const path = $('#playlist-folder').value.trim();
+  await run(async () => {
+    const folder = await request('/api/playlists/folder', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path })
+    });
+    $('#playlist-folder').value = folder.path;
+    await refreshPlaylists();
+  });
+};
 $('#audio-start').onclick = () => run(() => engineRequest('audio/initialize', 'POST'));
 $('#audio-stop').onclick = () => run(() => engineRequest('audio/shutdown', 'POST'));
 $('#pfl-stop').onclick = () => run(() => engineRequest('decks/PFL/stop', 'POST'));
+$('#next-track').onclick = () => { $('#track-menu').classList.remove('show'); loadFreeDeck(selectedTrack()); };
 $('#preview').onclick = () => { $('#track-menu').classList.remove('show'); loadPfl(); };
 $('#play-deck-1').onclick = () => { $('#track-menu').classList.remove('show'); loadAndPlayDeck('Deck 1'); };
 $('#play-deck-2').onclick = () => { $('#track-menu').classList.remove('show'); loadAndPlayDeck('Deck 2'); };
+$('#search-tab').onclick = () => {
+  $('#search-tab').classList.add('active'); $('#playlists-tab').classList.remove('active');
+  $('#search-view').hidden = false; $('#playlists-view').hidden = true;
+};
+$('#playlists-tab').onclick = () => {
+  $('#playlists-tab').classList.add('active'); $('#search-tab').classList.remove('active');
+  $('#search-view').hidden = true; $('#playlists-view').hidden = false;
+  refreshPlaylists();
+};
 document.addEventListener('click', () => $('#track-menu').classList.remove('show'));
 document.querySelectorAll('[data-deck]').forEach(button => button.onclick = () => run(() => engineRequest(`decks/${encodeURIComponent(button.dataset.deck)}/${button.dataset.action}`, 'POST')));
 $('#search').oninput = renderTracks;
@@ -116,8 +199,9 @@ async function bootstrap() {
   try
   {
     await refreshTracks();
+    await refreshPlaylists();
     await refreshStatus();
-    setInterval(refreshStatus, 2000);
+    setInterval(async () => { await refreshStatus(); await syncLoadedPlaylist(); }, 2000);
   }
   catch (error)
   {

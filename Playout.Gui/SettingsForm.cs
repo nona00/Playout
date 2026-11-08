@@ -1,34 +1,42 @@
 using System.Drawing;
 using System.Windows.Forms;
+using Playout;
 
 namespace Playout.Gui;
 
 internal sealed class SettingsForm : Form
 {
     private readonly Action<IReadOnlyList<string>> saveSources;
+    private readonly Action<string> savePlaylistFolder;
     private readonly Func<Task> configureAudio;
     private readonly Func<Task> configurePfl;
     private readonly Func<Task> initializeAudio;
     private readonly Func<Task> shutdownAudio;
     private readonly ListBox sourcesList = new() { Dock = DockStyle.Fill, HorizontalScrollbar = true };
     private readonly List<string> sources;
+    private readonly TextBox playlistFolder = new() { Dock = DockStyle.Fill };
 
     public IReadOnlyList<string> Sources => sources;
+    public string PlaylistFolder => playlistFolder.Text.Trim();
 
     public SettingsForm(
         IEnumerable<string> currentSources,
         Action<IReadOnlyList<string>> saveSources,
+        string currentPlaylistFolder,
+        Action<string> savePlaylistFolder,
         Func<Task> configureAudio,
         Func<Task> configurePfl,
         Func<Task> initializeAudio,
         Func<Task> shutdownAudio)
     {
         this.saveSources = saveSources;
+        this.savePlaylistFolder = savePlaylistFolder;
         this.configureAudio = configureAudio;
         this.configurePfl = configurePfl;
         this.initializeAudio = initializeAudio;
         this.shutdownAudio = shutdownAudio;
         sources = currentSources.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        playlistFolder.Text = currentPlaylistFolder;
 
         Text = "Einstellungen";
         StartPosition = FormStartPosition.CenterParent;
@@ -40,6 +48,7 @@ internal sealed class SettingsForm : Form
 
         TabControl tabs = new() { Dock = DockStyle.Fill };
         tabs.TabPages.Add(CreateSourcesPage());
+        tabs.TabPages.Add(CreatePlaylistsPage());
         tabs.TabPages.Add(CreateAudioPage());
 
         Button cancel = new() { Text = "Abbrechen", AutoSize = true, DialogResult = DialogResult.Cancel };
@@ -53,6 +62,28 @@ internal sealed class SettingsForm : Form
         CancelButton = cancel;
         AcceptButton = save;
         RenderSources();
+    }
+
+    private TabPage CreatePlaylistsPage()
+    {
+        TabPage page = new("Spiellisten") { BackColor = BackColor, ForeColor = ForeColor };
+        TableLayoutPanel layout = new() { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 3 };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "Ordner mit M3U-, M3U8- oder PLS-Dateien, die im Recherchefenster angeboten werden."
+        }, 0, 0);
+        FlowLayoutPanel pathRow = new() { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
+        Button browse = new() { Text = "Ordner auswählen", AutoSize = true };
+        browse.Click += (_, _) => BrowsePlaylistFolder();
+        pathRow.Controls.Add(playlistFolder);
+        pathRow.Controls.Add(browse);
+        layout.Controls.Add(pathRow, 0, 1);
+        page.Controls.Add(layout);
+        return page;
     }
 
     private TabPage CreateSourcesPage()
@@ -78,6 +109,18 @@ internal sealed class SettingsForm : Form
         layout.Controls.Add(actions, 0, 2);
         page.Controls.Add(layout);
         return page;
+    }
+
+    private void BrowsePlaylistFolder()
+    {
+        using FolderBrowserDialog dialog = new()
+        {
+            Description = "Ordner mit Spiellisten auswählen",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(playlistFolder.Text) ? playlistFolder.Text : string.Empty
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            playlistFolder.Text = dialog.SelectedPath;
     }
 
     private TabPage CreateAudioPage()
@@ -137,10 +180,11 @@ internal sealed class SettingsForm : Form
         try
         {
             saveSources(sources);
+            savePlaylistFolder(PlaylistFolder);
             DialogResult = DialogResult.OK;
             Close();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
             MessageBox.Show(this, exception.Message, "Einstellungen konnten nicht gespeichert werden", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }

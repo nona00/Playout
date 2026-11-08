@@ -124,26 +124,38 @@ internal sealed partial class MainForm : Form
         logWindow.Activate();
     }
 
-    private static Control CreatePlaylistPanel()
+    private Control CreatePlaylistPanel()
     {
         Panel panel = CreatePanel();
-
-        ListView list = new()
+        playlistTrackList.Dock = DockStyle.Fill;
+        playlistTrackList.View = View.Details;
+        playlistTrackList.FullRowSelect = true;
+        playlistTrackList.MultiSelect = false;
+        playlistTrackList.BackColor = PanelColor;
+        playlistTrackList.ForeColor = TextColor;
+        playlistTrackList.BorderStyle = BorderStyle.None;
+        playlistTrackList.Columns.Add("Titel", 240);
+        playlistTrackList.Columns.Add("Dateipfad", 420);
+        ContextMenuStrip playlistTrackMenu = new();
+        playlistTrackMenu.Items.Add("Next (freier Ausspielschacht)", null, async (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            BackColor = PanelColor,
-            ForeColor = TextColor,
-            BorderStyle = BorderStyle.None
+            if (playlistTrackList.SelectedItems.Count == 1 && playlistTrackList.SelectedItems[0].Tag is MusicTrack track)
+                await LoadAndPlayInFreeDeckAsync(track);
+        });
+        playlistTrackMenu.Items.Add("Über PFL vorhören", null, async (_, _) =>
+        {
+            if (playlistTrackList.SelectedItems.Count == 1 && playlistTrackList.SelectedItems[0].Tag is MusicTrack track)
+                await PreviewTrackAsync(track);
+        });
+        playlistTrackList.ContextMenuStrip = playlistTrackMenu;
+        playlistTrackList.MouseDown += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Right) return;
+            ListViewItem? item = playlistTrackList.GetItemAt(eventArgs.X, eventArgs.Y);
+            if (item is not null) item.Selected = true;
         };
-
-        list.Columns.Add("Zeit", 80);
-        list.Columns.Add("Titel", 240);
-        list.Columns.Add("Interpret", 180);
-        list.Columns.Add("AOT", 80);
-
-        panel.Controls.Add(list);
+        panel.Controls.Add(playlistTrackList);
+        panel.Controls.Add(loadedPlaylistName);
         panel.Controls.Add(CreateHeading("SPIELLISTE"));
         return panel;
     }
@@ -151,24 +163,37 @@ internal sealed partial class MainForm : Form
     private Control CreateBrowserPanel()
     {
         Panel panel = CreatePanel();
-        TableLayoutPanel browser = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+        TableLayoutPanel browser = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        browser.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         browser.Controls.Add(CreateHeading("MUSIKQUELLEN / RECHERCHE"), 0, 0);
 
+        TabControl tabs = new() { Dock = DockStyle.Fill };
+        tabs.TabPages.Add(CreateSearchPage());
+        tabs.TabPages.Add(CreatePlaylistBrowserPage());
+        browser.Controls.Add(tabs, 0, 1);
+        panel.Controls.Add(browser);
+        return panel;
+    }
+
+    private TabPage CreateSearchPage()
+    {
+        TabPage page = new("Recherche") { BackColor = PanelColor, ForeColor = TextColor };
+        TableLayoutPanel layout = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(6) };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         musicSearch.Dock = DockStyle.Fill;
         musicSearch.PlaceholderText = "Dateiname oder Pfad suchen";
         musicSearch.TextChanged += (_, _) => RenderTracks();
-        browser.Controls.Add(musicSearch, 0, 1);
+        layout.Controls.Add(musicSearch, 0, 0);
 
         FlowLayoutPanel pfl = new() { Dock = DockStyle.Fill, WrapContents = false };
         pfl.Controls.Add(new Label { Text = "PFL", AutoSize = true, Padding = new Padding(0, 8, 8, 0), ForeColor = MutedColor });
         pfl.Controls.Add(pflStatus);
         pfl.Controls.Add(CreateActionButton("Stopp", async () => await RunDeckActionAsync("PFL", "Wiedergabe gestoppt")));
-        browser.Controls.Add(pfl, 0, 2);
+        layout.Controls.Add(pfl, 0, 1);
 
         musicList.Dock = DockStyle.Fill;
         musicList.View = View.Details;
@@ -189,15 +214,35 @@ internal sealed partial class MainForm : Form
             if (item is not null) item.Selected = true;
         };
         musicList.DoubleClick += async (_, _) => await LoadAndPlayInFreeDeckAsync();
-        browser.Controls.Add(musicList, 0, 3);
+        layout.Controls.Add(musicList, 0, 2);
 
         FlowLayoutPanel loadButtons = new() { Dock = DockStyle.Fill, WrapContents = false };
         loadButtons.Controls.Add(CreateActionButton("In Schacht 1 laden", async () => await LoadSelectedAsync("Deck 1")));
         loadButtons.Controls.Add(CreateActionButton("In Schacht 2 laden", async () => await LoadSelectedAsync("Deck 2")));
         loadButtons.Controls.Add(libraryStatus);
-        browser.Controls.Add(loadButtons, 0, 4);
-        panel.Controls.Add(browser);
-        return panel;
+        layout.Controls.Add(loadButtons, 0, 3);
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    private TabPage CreatePlaylistBrowserPage()
+    {
+        TabPage page = new("Spiellisten") { BackColor = PanelColor, ForeColor = TextColor };
+        TableLayoutPanel layout = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(6) };
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        playlistFilesList.Dock = DockStyle.Fill;
+        playlistFilesList.View = View.List;
+        playlistFilesList.FullRowSelect = true;
+        playlistFilesList.MultiSelect = false;
+        playlistFilesList.BackColor = PanelColor;
+        playlistFilesList.ForeColor = TextColor;
+        playlistFilesList.BorderStyle = BorderStyle.None;
+        playlistFilesList.DoubleClick += async (_, _) => await LoadPlaylistIntoMainAsync();
+        layout.Controls.Add(playlistFilesList, 0, 0);
+        layout.Controls.Add(playlistsStatus, 0, 1);
+        page.Controls.Add(layout);
+        return page;
     }
 
     private Control CreateDeckPanel(string title, string deckId, Label status)
