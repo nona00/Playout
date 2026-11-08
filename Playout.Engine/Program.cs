@@ -83,6 +83,7 @@ app.MapPut("/api/audio-routing", (
 
 app.MapGet("/api/decks", (AudioPlayback playback) => Results.Ok(playback.GetDecks()));
 app.MapGet("/api/audio/status", (AudioPlayback playback) => Results.Ok(playback.GetStatus()));
+app.MapGet("/api/audio/levels", (AudioPlayback playback) => Results.Ok(playback.GetLevels()));
 app.MapPost("/api/audio/initialize", (AudioRoutingStore store, AudioPlayback playback) =>
     RunAudioCommand(() => playback.Initialize(store)));
 app.MapPost("/api/audio/shutdown", (AudioPlayback playback) =>

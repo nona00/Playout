@@ -7,6 +7,7 @@ internal sealed record EngineDevice(string Id, string Name, int NativeIndex, boo
 internal sealed record EngineBackend(string Backend, bool Available, string? Error, IReadOnlyList<EngineDevice> Devices);
 internal sealed record EngineDeviceStatus(string Backend, string DeviceId, string Name, string? Error);
 internal sealed record EngineDeckStatus(string DeckId, string? Path, string State, string? Error);
+internal sealed record EngineDeckLevel(string DeckId, float Level);
 internal sealed record EngineAudioStatus(bool Initialized, IReadOnlyList<EngineDeviceStatus> Devices, IReadOnlyList<EngineDeckStatus> Decks);
 internal sealed record EngineDeviceMapping(string Backend, string DeviceId, int LeftChannel, int RightChannel);
 internal sealed record EngineOutput(string Id, string Purpose, EngineDeviceMapping? Device);
@@ -21,6 +22,7 @@ internal sealed class EngineClient : IDisposable
     public EngineClient(HttpClient client) => this.client = client;
 
     public Task<EngineAudioStatus> GetStatusAsync() => GetAsync<EngineAudioStatus>("api/audio/status");
+    public Task<IReadOnlyList<EngineDeckLevel>> GetLevelsAsync() => GetAsync<IReadOnlyList<EngineDeckLevel>>("api/audio/levels");
     public Task<IReadOnlyList<EngineBackend>> GetDevicesAsync() => GetAsync<IReadOnlyList<EngineBackend>>("api/audio-devices");
     public Task<EngineRouting> GetRoutingAsync() => GetAsync<EngineRouting>("api/audio-routing");
     public Task InitializeAsync() => SendAsync(HttpMethod.Post, "api/audio/initialize");

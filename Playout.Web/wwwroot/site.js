@@ -1,6 +1,7 @@
 const engine = '/api/engine/';
 let tracks = [], playlists = [], loadedPlaylist = [], selected = null;
 let loadedPlaylistName = '', syncingPlaylist = false;
+let refreshingMeters = false;
 const $ = selector => document.querySelector(selector);
 const startupTime = Date.now();
 let engineUnavailable = false;
@@ -129,6 +130,27 @@ async function refreshStatus() {
     setAppError('Die Engine ist nicht erreichbar. Bitte Engine und Routing prüfen.');
   }
 }
+function renderMeter(id, level) {
+  const meter = $(`#${id}`);
+  const normalized = Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0;
+  const percent = Math.round(normalized * 100);
+  meter.setAttribute('aria-valuenow', String(percent));
+  meter.querySelector('.web-meter-fill').style.height = `${percent}%`;
+}
+async function refreshMeters() {
+  if (refreshingMeters) return;
+  refreshingMeters = true;
+  try {
+    const levels = await engineRequest('audio/levels');
+    const level = id => levels.find(item => item.deckId === id)?.level ?? 0;
+    renderMeter('deck-1-meter', level('Deck 1'));
+    renderMeter('deck-2-meter', level('Deck 2'));
+  } catch {
+    renderMeter('deck-1-meter', 0);
+    renderMeter('deck-2-meter', 0);
+  }
+  finally { refreshingMeters = false; }
+}
 async function run(action) { try { await action(); await refreshStatus(); } catch (error) { showError(error.message); } }
 async function loadFreeDeck(track) {
   await run(async () => { const status = await engineRequest('audio/status'); const deck = status.decks.find(item => (item.deckId === 'Deck 1' || item.deckId === 'Deck 2') && !item.path); if (!deck) throw new Error('Kein freier Ausspielschacht verf\u00fcgbar.'); await engineRequest(`decks/${encodeURIComponent(deck.deckId)}/load`, 'POST', { path: track.path }); await engineRequest(`decks/${encodeURIComponent(deck.deckId)}/play`, 'POST'); });
@@ -201,7 +223,9 @@ async function bootstrap() {
     await refreshTracks();
     await refreshPlaylists();
     await refreshStatus();
+    await refreshMeters();
     setInterval(async () => { await refreshStatus(); await syncLoadedPlaylist(); }, 2000);
+    setInterval(refreshMeters, 80);
   }
   catch (error)
   {

@@ -81,18 +81,24 @@ internal sealed partial class MainForm : Form
         TableLayoutPanel lowerLayout = new()
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 7,
             RowCount = 1,
             Margin = Padding.Empty
         };
 
-        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
-        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 4));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 4));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 4));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        lowerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 4));
 
-        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 1", "Deck 1", deck1Status), 0, 0);
-        lowerLayout.Controls.Add(CreateAotPanel(), 1, 0);
-        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 2", "Deck 2", deck2Status), 2, 0);
+        lowerLayout.Controls.Add(CreateMeterPanel(deck1Meter), 0, 0);
+        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 1", "Deck 1", deck1Status), 1, 0);
+        lowerLayout.Controls.Add(CreateAotPanel(), 3, 0);
+        lowerLayout.Controls.Add(CreateDeckPanel("AUSSPIELSCHACHT 2", "Deck 2", deck2Status), 5, 0);
+        lowerLayout.Controls.Add(CreateMeterPanel(deck2Meter), 6, 0);
 
         layout.Controls.Add(lowerLayout, 0, 1);
         layout.SetColumnSpan(lowerLayout, 2);
@@ -134,6 +140,10 @@ internal sealed partial class MainForm : Form
         playlistTrackList.BackColor = PanelColor;
         playlistTrackList.ForeColor = TextColor;
         playlistTrackList.BorderStyle = BorderStyle.None;
+        playlistTrackList.OwnerDraw = true;
+        playlistTrackList.DrawColumnHeader += DrawListColumnHeader;
+        playlistTrackList.DrawItem += (_, eventArgs) => eventArgs.DrawDefault = true;
+        playlistTrackList.DrawSubItem += (_, eventArgs) => eventArgs.DrawDefault = true;
         playlistTrackList.Columns.Add("Titel", 240);
         playlistTrackList.Columns.Add("Dateipfad", 420);
         ContextMenuStrip playlistTrackMenu = new();
@@ -155,8 +165,41 @@ internal sealed partial class MainForm : Form
             if (item is not null) item.Selected = true;
         };
         panel.Controls.Add(playlistTrackList);
-        panel.Controls.Add(loadedPlaylistName);
-        panel.Controls.Add(CreateHeading("SPIELLISTE"));
+        FlowLayoutPanel heading = new()
+        {
+            Dock = DockStyle.Top,
+            Height = 36,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight
+        };
+        Label title = CreateHeading("SPIELLISTE");
+        title.Dock = DockStyle.None;
+        title.AutoSize = true;
+        title.Height = 36;
+        title.Padding = new Padding(0, 0, 10, 0);
+        loadedPlaylistName.AutoSize = false;
+        loadedPlaylistName.Width = 600;
+        loadedPlaylistName.Height = 36;
+        loadedPlaylistName.TextAlign = ContentAlignment.MiddleLeft;
+        loadedPlaylistName.Padding = Padding.Empty;
+        loadedPlaylistName.AutoEllipsis = true;
+        heading.Controls.Add(title);
+        heading.Controls.Add(loadedPlaylistName);
+        panel.Controls.Add(heading);
+        return panel;
+    }
+
+    private static Control CreateMeterPanel(AudioLevelMeter meter)
+    {
+        Panel panel = new()
+        {
+            Dock = DockStyle.Fill,
+            BackColor = PanelColor,
+            Padding = new Padding(6, 12, 6, 12),
+            Margin = new Padding(2, 6, 2, 6)
+        };
+        meter.Dock = DockStyle.Fill;
+        panel.Controls.Add(meter);
         return panel;
     }
 
@@ -168,12 +211,55 @@ internal sealed partial class MainForm : Form
         browser.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         browser.Controls.Add(CreateHeading("MUSIKQUELLEN / RECHERCHE"), 0, 0);
 
-        TabControl tabs = new() { Dock = DockStyle.Fill };
+        TabControl tabs = new()
+        {
+            Dock = DockStyle.Fill,
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            SizeMode = TabSizeMode.Fixed,
+            ItemSize = new Size(132, 34),
+            BackColor = PanelColor
+        };
+        tabs.DrawItem += DrawBrowserTab;
         tabs.TabPages.Add(CreateSearchPage());
         tabs.TabPages.Add(CreatePlaylistBrowserPage());
         browser.Controls.Add(tabs, 0, 1);
         panel.Controls.Add(browser);
         return panel;
+    }
+
+    private static void DrawBrowserTab(object? sender, DrawItemEventArgs eventArgs)
+    {
+        if (sender is not TabControl tabs || eventArgs.Index < 0)
+            return;
+
+        bool selected = eventArgs.Index == tabs.SelectedIndex;
+        Rectangle bounds = eventArgs.Bounds;
+        Color tabColor = selected ? Color.FromArgb(37, 61, 91) : Color.FromArgb(25, 32, 45);
+        using SolidBrush background = new(tabColor);
+        eventArgs.Graphics.FillRectangle(background, bounds);
+        if (selected)
+            eventArgs.Graphics.FillRectangle(Brushes.DeepSkyBlue, bounds.X + 1, bounds.Y + 1, bounds.Width - 2, 3);
+
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            tabs.TabPages[eventArgs.Index].Text,
+            tabs.Font,
+            bounds,
+            selected ? TextColor : MutedColor,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+    }
+
+    private static void DrawListColumnHeader(object? sender, DrawListViewColumnHeaderEventArgs eventArgs)
+    {
+        using SolidBrush background = new(Color.FromArgb(25, 55, 90));
+        eventArgs.Graphics.FillRectangle(background, eventArgs.Bounds);
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            eventArgs.Header.Text,
+            eventArgs.Font,
+            eventArgs.Bounds,
+            Color.White,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping);
     }
 
     private TabPage CreateSearchPage()
@@ -202,6 +288,10 @@ internal sealed partial class MainForm : Form
         musicList.BackColor = PanelColor;
         musicList.ForeColor = TextColor;
         musicList.BorderStyle = BorderStyle.None;
+        musicList.OwnerDraw = true;
+        musicList.DrawColumnHeader += DrawListColumnHeader;
+        musicList.DrawItem += (_, eventArgs) => eventArgs.DrawDefault = true;
+        musicList.DrawSubItem += (_, eventArgs) => eventArgs.DrawDefault = true;
         musicList.Columns.Add("Titel (Dateiname)", 220);
         musicList.Columns.Add("Dateipfad", 420);
         ContextMenuStrip musicMenu = new();

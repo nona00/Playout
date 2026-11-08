@@ -29,18 +29,22 @@ internal sealed partial class MainForm
     private readonly ListView playlistTrackList = new();
     private readonly Label libraryStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
     private readonly Label playlistsStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(4, 8, 0, 0) };
-    private readonly Label loadedPlaylistName = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(8, 5, 0, 0), Text = "Keine Spielliste geladen" };
+    private readonly Label loadedPlaylistName = new() { ForeColor = MutedColor, Text = "Keine Spielliste geladen" };
     private readonly Label engineStatus = new() { AutoSize = true, ForeColor = TextColor, Padding = new Padding(6, 8, 0, 0), Text = "Engine: Verbindung wird geprüft …" };
     private readonly Label deck1Status = new();
     private readonly Label deck2Status = new();
+    private readonly AudioLevelMeter deck1Meter = new();
+    private readonly AudioLevelMeter deck2Meter = new();
     private readonly Label pflStatus = new() { AutoSize = true, ForeColor = MutedColor, Padding = new Padding(0, 8, 8, 0), Text = "PFL nicht verbunden" };
     private readonly System.Windows.Forms.Timer statusTimer = new() { Interval = 2000 };
+    private readonly System.Windows.Forms.Timer meterTimer = new() { Interval = 80 };
     private readonly System.Windows.Forms.Timer startupGraceTimer = new() { Interval = 5000 };
     private readonly CancellationTokenSource lifetime = new();
     private DateTimeOffset guiStartedAt;
     private bool statusHasError;
     private bool scanning;
     private bool polling;
+    private bool meterPolling;
     private bool commandInProgress;
     private bool startingEngine;
     private bool startingWeb;
@@ -82,6 +86,8 @@ internal sealed partial class MainForm
             await SyncLoadedPlaylistAsync();
         };
         statusTimer.Start();
+        meterTimer.Tick += async (_, _) => await RefreshAudioLevelsAsync();
+        meterTimer.Start();
         Task engineStartup = EnsureEngineRunningAsync();
         Task webStartup = EnsureWebRunningAsync();
 
@@ -101,6 +107,33 @@ internal sealed partial class MainForm
         await statusRefresh;
     }
 
+    private async Task RefreshAudioLevelsAsync()
+    {
+        if (IsDisposed || meterPolling)
+            return;
+        meterPolling = true;
+        try
+        {
+            IReadOnlyList<EngineDeckLevel> levels = await engine.GetLevelsAsync();
+            if (IsDisposed)
+                return;
+            deck1Meter.Level = levels.FirstOrDefault(level => level.DeckId.Equals("Deck 1", StringComparison.OrdinalIgnoreCase))?.Level ?? 0;
+            deck2Meter.Level = levels.FirstOrDefault(level => level.DeckId.Equals("Deck 2", StringComparison.OrdinalIgnoreCase))?.Level ?? 0;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)
+        {
+            if (!IsDisposed)
+            {
+                deck1Meter.Level = 0;
+                deck2Meter.Level = 0;
+            }
+        }
+        finally
+        {
+            meterPolling = false;
+        }
+    }
+
     private void MainFormClosed(object? sender, FormClosedEventArgs e)
     {
         PlayoutLog.Write(LogPath, "Information", nameof(MainForm), "Playout wird beendet.");
@@ -113,6 +146,8 @@ internal sealed partial class MainForm
         windowIcon.Dispose();
         statusTimer.Stop();
         statusTimer.Dispose();
+        meterTimer.Stop();
+        meterTimer.Dispose();
         startupGraceTimer.Stop();
         startupGraceTimer.Dispose();
         lifetime.Cancel();

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 
 internal sealed record DeckPlaybackStatus(string DeckId, string? Path, string State, string? Error);
+internal sealed record DeckPlaybackLevel(string DeckId, float Level);
 internal sealed record DevicePlaybackStatus(AudioBackend Backend, string DeviceId, string Name, string? Error);
 internal sealed record AudioPlaybackStatus(bool Initialized, IReadOnlyList<DevicePlaybackStatus> Devices, IReadOnlyList<DeckPlaybackStatus> Decks);
 
@@ -20,6 +21,11 @@ internal sealed class AudioPlayback : IDisposable
     public IReadOnlyList<DeckPlaybackStatus> GetDecks()
     {
         lock (sync) return decks.Values.Select(deck => deck.GetStatus()).ToArray();
+    }
+
+    public IReadOnlyList<DeckPlaybackLevel> GetLevels()
+    {
+        lock (sync) return decks.Values.Select(deck => deck.GetLevel()).ToArray();
     }
 
     public AudioPlaybackStatus GetStatus()
@@ -273,9 +279,11 @@ internal sealed class PlaybackDeck : IDisposable
     private string? path;
     private string state = "Empty";
     private string? error;
+    private float level;
 
     public PlaybackDeck(string id) => this.id = id;
     public DeckPlaybackStatus GetStatus() { lock (sync) return new(id, path, state, error); }
+    public DeckPlaybackLevel GetLevel() => new(id, Volatile.Read(ref level));
 
     public void Load(string newPath)
     {
@@ -318,9 +326,14 @@ internal sealed class PlaybackDeck : IDisposable
     {
         lock (sync)
         {
-            if (state != "Playing") return;
-            if (!resampler!.Mix(target, frames, channels, left, right, outputRate))
+            if (state != "Playing")
+            {
+                Volatile.Write(ref level, 0);
+                return;
+            }
+            if (!resampler!.Mix(target, frames, channels, left, right, outputRate, out float measuredLevel))
                 state = error is null ? "Ended" : "Error";
+            Volatile.Write(ref level, measuredLevel);
         }
     }
 
